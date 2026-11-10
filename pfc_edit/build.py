@@ -1,0 +1,164 @@
+"""Build the Perfect Force Clamp client video.
+
+    python pfc_edit/build.py preview  --src pfc_demo.mp4 --out output/pfc_preview.mp4
+    python pfc_edit/build.py full     --src pfc_demo.mp4 --out output/pfc_demo_client.mp4
+
+The source file is only read, never written.
+"""
+import argparse
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gfx  # noqa: E402
+from timeline import TIMELINES  # noqa: E402
+
+W, H, FPS = gfx.W, gfx.H, gfx.FPS
+
+# Source is 3816x2160 with 36px black bars top and bottom (3816x2088 active).
+# Crop the bars, scale to fill UHD 3840x2160, then grade.
+GRADE = ",".join([
+    "crop=3816:2088:0:36",
+    "scale=3947:2160:flags=lanczos",
+    "crop=3840:2160",
+    "eq=contrast=1.08:saturation=1.12:gamma=0.96:brightness=-0.01",
+    "colorbalance=rs=-0.03:gs=-0.005:bs=0.035:rh=0.025:gh=0.01:bh=-0.02",
+    "curves=all='0/0 0.06/0.04 0.25/0.22 0.5/0.5 0.78/0.81 1/0.98'",
+    "cas=0.45",
+    "setsar=1",
+    f"fps={FPS}",
+    "format=yuv420p",
+])
+
+GFX_FUNCS = {
+    "intro": (gfx.intro, True),
+    "outro": (gfx.outro, True),
+    "wipe": (gfx.wipe, False),
+    "lower_third": (gfx.lower_third, False),
+    "callout": (gfx.callout, False),
+}
+
+
+def run(cmd):
+    print("+", " ".join(cmd[:6]), "...", flush=True)
+    subprocess.run(cmd, check=True)
+
+
+def render_gfx(kind, dur, path, logo, **kw):
+    """Render one graphic to a video file (opaque -> h264, alpha -> qtrle)."""
+    if os.path.exists(path):
+        return path
+    fn, opaque = GFX_FUNCS[kind]
+    if kind in ("intro", "outro"):
+        kw["logo"] = logo
+    if opaque:
+        enc = ["-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p"]
+    else:
+        enc = ["-c:v", "qtrle", "-pix_fmt", "argb"]
+    tmp = path + ".part" + os.path.splitext(path)[1]
+    p = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
+         "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", *enc, tmp],
+        stdin=subprocess.PIPE)
+    for frame in gfx.render_frames(fn, dur, opaque=opaque, **kw):
+        p.stdin.write(frame.tobytes())
+    p.stdin.close()
+    if p.wait() != 0:
+        raise RuntimeError(f"ffmpeg failed rendering {kind}")
+    os.replace(tmp, path)
+    return path
+
+
+def build(name, src, out, work, logo_path, crf, preset):
+    tl = TIMELINES[name]
+    os.makedirs(work, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    if os.path.abspath(out) == os.path.abspath(src):
+        raise SystemExit("Refusing to overwrite the source video.")
+    logo = gfx.load_logo(logo_path)
+
+    inputs, vlabels, filters = [], [], []
+    n_in = [0]
+
+    def add_input(*args):
+        inputs.extend(args)
+        n_in[0] += 1
+        return n_in[0] - 1
+
+    t = 0.0
+    joins = []
+    # ---- picture: main sequence ------------------------------------------
+    for i, item in enumerate(tl["sequence"]):
+        if item["type"] == "src":
+            idx = add_input("-ss", f"{item['in']:.3f}", "-to", f"{item['out']:.3f}", "-i", src)
+            filters.append(f"[{idx}:v]{GRADE},setpts=PTS-STARTPTS[v{i}]")
+            dur = item["out"] - item["in"]
+        else:
+            dur = item["dur"]
+            path = os.path.join(work, f"{item['type']}_{name}_{dur:.2f}.mp4")
+            render_gfx(item["type"], dur, path, logo, **item.get("args", {}))
+            idx = add_input("-i", path)
+            filters.append(f"[{idx}:v]setpts=PTS-STARTPTS,format=yuv420p[v{i}]")
+        vlabels.append(f"[v{i}]")
+        t += dur
+        joins.append(t)
+    total = t
+    filters.append("".join(vlabels) + f"concat=n={len(vlabels)}:v=1:a=0[base]")
+
+    # ---- picture: overlays ------------------------------------------------
+    cur = "base"
+    overlays = list(tl.get("overlays", []))
+    # branded wipe centred on the joins that ask for it
+    for j in tl.get("wipe_after", []):
+        overlays.append({"type": "wipe", "at": joins[j] - 0.55, "dur": 1.1})
+    for k, ov in enumerate(overlays):
+        path = os.path.join(work, f"ov_{name}_{k}_{ov['type']}.mov")
+        if os.path.exists(path):
+            os.remove(path)  # overlays are cheap; always re-render so edits show
+        render_gfx(ov["type"], ov["dur"], path, logo, **ov.get("args", {}))
+        idx = add_input("-i", path)
+        nxt = f"o{k}"
+        filters.append(f"[{idx}:v]setpts=PTS-STARTPTS+{ov['at']:.3f}/TB[g{k}]")
+        filters.append(f"[{cur}][g{k}]overlay=0:0:eof_action=pass:format=auto[{nxt}]")
+        cur = nxt
+    filters.append(f"[{cur}]format=yuv420p[vout]")
+
+    # ---- audio: original track, continuous --------------------------------
+    a0 = tl.get("audio_start", 0.0)
+    aidx = add_input("-i", src)
+    filters.append(
+        f"[{aidx}:a]atrim=start={a0}:duration={total:.3f},asetpts=PTS-STARTPTS,"
+        f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(total - 2.5, 0):.3f}:d=2.5[aout]")
+
+    graph = os.path.join(work, f"graph_{name}.txt")
+    with open(graph, "w") as f:
+        f.write(";\n".join(filters))
+    run(["ffmpeg", "-y", "-hide_banner", "-stats", "-v", "warning", *inputs,
+         "-filter_complex_script", graph, "-map", "[vout]", "-map", "[aout]",
+         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+         "-profile:v", "high", "-level", "5.1", "-pix_fmt", "yuv420p",
+         "-r", str(FPS), "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+         "-movflags", "+faststart", "-t", f"{total:.3f}", out])
+    print(f"done: {out}  ({total:.2f}s)")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("timeline", choices=sorted(TIMELINES))
+    ap.add_argument("--src", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--work", default="work")
+    assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    default_logo = os.path.join(assets, "logo.png")
+    if not os.path.exists(default_logo):  # fallback: logo keyed from the source intro
+        default_logo = os.path.join(assets, "logo_from_video.png")
+    ap.add_argument("--logo", default=default_logo)
+    ap.add_argument("--crf", type=int, default=17)
+    ap.add_argument("--preset", default="medium")
+    a = ap.parse_args()
+    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset)
+
+
+if __name__ == "__main__":
+    main()
