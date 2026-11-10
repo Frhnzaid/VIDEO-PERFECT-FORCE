@@ -37,6 +37,7 @@ GFX_FUNCS = {
     "wipe": (gfx.wipe, False),
     "lower_third": (gfx.lower_third, False),
     "callout": (gfx.callout, False),
+    "how_it_works": (gfx.how_it_works, True),
 }
 
 
@@ -108,7 +109,24 @@ def build(name, src, out, work, logo_path, crf, preset):
 
     # ---- picture: overlays ------------------------------------------------
     cur = "base"
-    overlays = list(tl.get("overlays", []))
+    # overlays may be placed by source time ("src_at") instead of timeline time
+    src_map, acc = [], 0.0
+    for item in tl["sequence"]:
+        d = item["out"] - item["in"] if item["type"] == "src" else item["dur"]
+        if item["type"] == "src":
+            src_map.append((item["in"], item["out"], acc))
+        acc += d
+    overlays = []
+    for ov in tl.get("overlays", []):
+        ov = dict(ov)
+        if "src_at" in ov:
+            for a, b, start in src_map:
+                if a <= ov["src_at"] < b:
+                    ov["at"] = start + ov["src_at"] - a
+                    break
+            else:
+                raise ValueError(f"src_at {ov['src_at']} not in any source segment")
+        overlays.append(ov)
     # branded wipe centred on the joins that ask for it
     for j in tl.get("wipe_after", []):
         overlays.append({"type": "wipe", "at": joins[j] - 0.55, "dur": 1.1})
@@ -151,8 +169,8 @@ def main():
     ap.add_argument("--work", default="work")
     assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
     default_logo = os.path.join(assets, "logo.png")
-    if not os.path.exists(default_logo):  # fallback: logo keyed from the source intro
-        default_logo = os.path.join(assets, "logo_from_video.png")
+    if not os.path.exists(default_logo):  # fallback: logo rebuilt from the source intro
+        default_logo = os.path.join(assets, "logo_reverse.png")
     ap.add_argument("--logo", default=default_logo)
     ap.add_argument("--crf", type=int, default=17)
     ap.add_argument("--preset", default="medium")

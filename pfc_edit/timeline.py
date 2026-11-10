@@ -14,6 +14,7 @@ New-timeline mapping for the full edit:
   part 2 (src 205.17-355.04): new = src - 11.25
 
 """
+from gfx import SEQ_TOTAL
 
 TIMELINES = {
     # ~15.75 s style preview: intro -> wipe -> first installation shots
@@ -32,38 +33,41 @@ TIMELINES = {
         "audio_start": 0.0,
     },
 
-    # full client edit, ~5:52
+    # full client edit, ~6:21
     "full": {
         "sequence": [
             {"type": "intro", "dur": 6.0},
+            {"type": "how_it_works", "dur": SEQ_TOTAL},
             {"type": "src", "in": 12.25, "out": 200.17},
             {"type": "src", "in": 205.17, "out": 355.04},
             {"type": "outro", "dur": 8.0},
         ],
-        "wipe_after": [0, 1, 2],
+        "wipe_after": [0, 1, 2, 3],
+        # overlays placed by source time (src_at), so they follow the footage
         "overlays": [
             # --- STEP 01: installation ------------------------------------
-            {"type": "lower_third", "at": 7.0, "dur": 5.0,
+            {"type": "lower_third", "src_at": 13.25, "dur": 5.0,
              "args": {"kicker": "STEP 01", "title": "PERFECT FORCE CLAMP INSTALLATION"}},
-            {"type": "callout", "at": 12.95, "dur": 2.8,           # src 19.2
+            {"type": "callout", "src_at": 19.2, "dur": 2.8,
              "args": {"cx": 1830, "cy": 1300, "r": 300, "label": "PFC CLAMP"}},
-            {"type": "callout", "at": 18.25, "dur": 3.2,           # src 24.5
+            {"type": "callout", "src_at": 24.5, "dur": 3.2,
              "args": {"cx": 3150, "cy": 1650, "r": 430, "label": "FLANGE", "side": "left"}},
-            {"type": "callout", "at": 22.6, "dur": 3.2,            # src 28.85
+            {"type": "callout", "src_at": 28.85, "dur": 3.2,
              "args": {"cx": 3005, "cy": 1505, "r": 120, "label": "STUD BOLT & NUT",
                       "side": "left", "rise": 420, "run": 260}},
-            {"type": "lower_third", "at": 90.6, "dur": 5.0,        # src 96.85
+            {"type": "lower_third", "src_at": 96.85, "dur": 5.0,
              "args": {"kicker": "STEP 01 \u00b7 INSTALLATION", "title": "TEST ASSEMBLY"}},
             # --- STEP 02: hydrotest ---------------------------------------
-            {"type": "lower_third", "at": 194.6, "dur": 5.5,       # src 205.85
-             "args": {"kicker": "STEP 02", "title": "HYDROTEST PRESSURE TESTING"}},
-            {"type": "callout", "at": 200.75, "dur": 3.6,          # src 212
+            {"type": "lower_third", "src_at": 205.85, "dur": 5.5,
+             "args": {"kicker": "STEP 02", "title": "HYDROTEST PRESSURE TESTING",
+                      "sub": "Test pressure: 5,600 psi"}},
+            {"type": "callout", "src_at": 212.0, "dur": 3.6,
              "args": {"cx": 1940, "cy": 900, "r": 310, "label": "PRESSURE GAUGE"}},
-            {"type": "lower_third", "at": 233.0, "dur": 5.0,       # src 244.25
+            {"type": "lower_third", "src_at": 244.25, "dur": 5.0,
              "args": {"kicker": "STEP 02 \u00b7 HYDROTEST", "title": "PRESSURE CHART RECORDER"}},
-            {"type": "lower_third", "at": 315.1, "dur": 5.0,       # src 326.35
+            {"type": "lower_third", "src_at": 326.35, "dur": 5.0,
              "args": {"kicker": "STEP 02 \u00b7 HYDROTEST", "title": "COMPLETE TEST ASSEMBLY"}},
-            {"type": "lower_third", "at": 339.2, "dur": 4.1,       # src 350.45
+            {"type": "lower_third", "src_at": 350.45, "dur": 4.1,
              "args": {"kicker": "RESULT", "title": "RECORDED PRESSURE CHART"}},
         ],
         "audio_start": 0.0,
