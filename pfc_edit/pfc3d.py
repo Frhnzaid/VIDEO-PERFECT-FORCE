@@ -4,9 +4,10 @@
                              [--frames A-B] [--samples N] [--blend file.blend]
 
 Scene: a 4-stud-bolt flanged joint on a live line (cut-away pipe with moving
-fluid) and the PFC: two rings of four segments each, joined by four PFC stud
-bolts outside the flange OD. Proportions follow the reference photos; they are
-illustrative, not to scale.
+fluid) and the PFC as in reference/pfc_photos: four V-shaped lug plates on each
+face (PFC stud bolt + two cap screws each) and four split, ribbed jaws on the
+diagonals around the flange OD, pulled together by four PFC stud bolts outside
+the flange OD. Proportions follow the photos; illustrative, not to scale.
 
 Sequence (seconds at 24 fps), shared with the 2D overlay in gfx.py (PFC3D_*):
   0.0 -  3.5  establishing shot, line under pressure
@@ -22,6 +23,7 @@ import os
 import sys
 
 import bpy
+import bmesh  # noqa: E402  (available once bpy is loaded)
 from mathutils import Vector
 
 FPS = 24
@@ -33,10 +35,19 @@ FL_R, FL_T, GAP = 1.6, 0.35, 0.05          # flange radius, thickness, gasket ga
 HUB_R0, HUB_R1, HUB_L = 0.72, PIPE_R, 0.5  # weld-neck hub
 BC_R = 1.2                                 # flange bolt circle
 STUD_R, NUT_AF, NUT_T = 0.10, 0.34, 0.22
-RING_RO, RING_RI, RING_T = 2.35, 0.86, 0.40
-PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T = 1.98, 0.13, 0.42, 0.28
+# PFC proportions taken from the reference photos (front view: flange OD is
+# ~0.55 of the PFC OD; four V-shaped lug plates at 0/90/180/270 deg; four
+# split, ribbed jaws on the diagonals wrapped around the flange OD)
+PFC_RO = 2.9                               # PFC outer radius
+LUG_HALF = 29.0                            # lug outer arc half-angle (deg)
+LUG_TIP_R, LUG_TIP_W = 1.15, 0.13          # flat tip of the V, half-width
+LUG_T = 0.42                               # lug plate thickness (axial)
+JAW_RI = FL_R + 0.03                       # jaws sit just outside the flange OD
+GAPC = 0.012                               # clearance between PFC parts
+PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T = 2.42, 0.14, 0.44, 0.30
 X_FL = GAP / 2 + FL_T                      # outer face of each flange
-X_RING = X_FL + RING_T                     # outer face of each PFC ring
+X_RING = X_FL + LUG_T                      # outer face of the lug plates
+JAW_X = X_FL + LUG_T * 0.72               # jaws slightly recessed from the lugs
 
 FLANGE_ANG = [45, 135, 225, 315]           # flange studs on the diagonals
 PFC_ANG = [0, 90, 180, 270]                # PFC studs / segments
@@ -102,12 +113,13 @@ def boolean(target, cutter, op="DIFFERENCE", keep=False):
         bpy.data.objects.remove(cutter, do_unlink=True)
 
 
-def bevel(o, w=0.012, seg=2):
+def bevel(o, w=0.012, seg=2, weighted=True):
     m = o.modifiers.new("bev", "BEVEL")
     m.width = w
     m.segments = seg
     m.limit_method = "ANGLE"
-    o.modifiers.new("wn", "WEIGHTED_NORMAL")
+    if weighted:
+        o.modifiers.new("wn", "WEIGHTED_NORMAL")
 
 
 def smooth(o):
@@ -291,69 +303,145 @@ def build_flange_studs(M):
     return studs
 
 
-def build_ring(name, x0, x1, M):
-    ring = cyl_x(name, RING_RO, x0, x1, verts=160)
-    inner = cyl_x("ri", RING_RI, x0 - 0.1, x1 + 0.1, verts=96)
-    boolean(ring, inner)
-    # slots for the flange nuts on the diagonals
-    for a in FLANGE_ANG:
-        y, z = polar(BC_R, a)
-        s = cyl_x("slot", 0.30, x0 - 0.1, x1 + 0.1, verts=48, y=y, z=z)
-        boolean(ring, s)
-        yc, zc = polar(BC_R * 0.55, a)
-        sb = box("slotb", (abs(x1 - x0) + 0.2, 0.6, BC_R * 1.1),
-                 ((x0 + x1) / 2, yc, zc), (math.radians(a - 90), 0, 0))
-        boolean(ring, sb)
-    # PFC stud holes
-    for a in PFC_ANG:
-        y, z = polar(PFC_BC, a)
-        h = cyl_x("ph", PFC_STUD_R * 1.12, x0 - 0.1, x1 + 0.1, verts=32, y=y, z=z)
-        boolean(ring, h)
-    # grooves on the jaw faces (machined ribs, as in the photos)
-    for a in FLANGE_ANG:
-        for k in range(-3, 4):
-            g = box("rib", (abs(x1 - x0) + 0.2, 0.025, 0.06),
-                    ((x0 + x1) / 2, *polar(RING_RO, a + k * 4.0)),
-                    (math.radians(a + k * 4.0), 0, 0))
-            boolean(ring, g)
-    # split into four segments along the diagonals
-    for a in FLANGE_ANG:
-        yc, zc = polar(RING_RO * 0.75, a)
-        cut = box("split", (abs(x1 - x0) + 0.3, 0.035, RING_RO * 1.0),
-                  ((x0 + x1) / 2, yc, zc), (math.radians(a - 90), 0, 0))
-        boolean(ring, cut)
-    set_mat(ring, M["machined"])
-    activate(ring)
+def prism(name, pts, x0, x1):
+    """Extrude a closed (y, z) polygon along X from x0 to x1."""
+    n = len(pts)
+    verts = [(x0, y, z) for y, z in pts] + [(x1, y, z) for y, z in pts]
+    faces = [list(range(n))[::-1], list(range(n, 2 * n))]
+    faces += [[i, (i + 1) % n, n + (i + 1) % n, n + i] for i in range(n)]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    # concave n-gon caps shade badly under bevel + weighted normals: triangulate them
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 4],
+                          quad_method="BEAUTY", ngon_method="BEAUTY")
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(o)
+    activate(o)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.mesh.separate(type="LOOSE")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
-    segs = [o for o in bpy.context.selected_objects]
-    for o in segs:
-        set_origin_center(o)
-        bevel(o, 0.015)
-        smooth(o)
-        # grub screw on the outer rim of each segment
-        oy, oz = o.location.y, o.location.z
-        ang = math.degrees(math.atan2(oz, oy))
-        gy, gz = polar(RING_RO, ang)
-        bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.05, depth=0.08,
-                                            location=((x0 + x1) / 2, gy, gz),
-                                            rotation=(math.radians(ang - 90), 0, 0))
-        gs = bpy.context.object
-        set_mat(gs, M["dark"])
-        gs.parent = o
-        gs.matrix_parent_inverse = o.matrix_world.inverted()
-    return segs
+    return o
+
+
+def arc(r, a0, a1, n=24):
+    return [polar(r, a0 + (a1 - a0) * i / n) for i in range(n + 1)]
+
+
+def _rot(p, ang):
+    a = math.radians(ang)
+    y, z = p
+    return (y * math.cos(a) - z * math.sin(a), y * math.sin(a) + z * math.cos(a))
+
+
+def _offset_line(p0, p1, d):
+    """Shift segment p0->p1 sideways by d (positive = left of direction)."""
+    dy, dz = p1[0] - p0[0], p1[1] - p0[1]
+    L = math.hypot(dy, dz)
+    ny, nz = -dz / L * d, dy / L * d
+    return (p0[0] + ny, p0[1] + nz), (p1[0] + ny, p1[1] + nz)
+
+
+def _line_circle(p0, p1, r):
+    """Point on the infinite line p0->p1 at distance r from the origin (towards p1)."""
+    dy, dz = p1[0] - p0[0], p1[1] - p0[1]
+    a = dy * dy + dz * dz
+    b = 2 * (p0[0] * dy + p0[1] * dz)
+    c = p0[0] ** 2 + p0[1] ** 2 - r * r
+    s = (-b + math.sqrt(max(b * b - 4 * a * c, 0))) / (2 * a)
+    return (p0[0] + s * dy, p0[1] + s * dz)
+
+
+def lug_outline():
+    """V-shaped lug plate centred on angle 0 (pointing at the pipe)."""
+    tip_hi, tip_lo = (LUG_TIP_R, LUG_TIP_W), (LUG_TIP_R, -LUG_TIP_W)
+    pts = [tip_lo] + arc(PFC_RO, -LUG_HALF, LUG_HALF) + [tip_hi]
+    return pts
+
+
+def lug_sides(ang):
+    """The two V edges of the lug at `ang`, as (outer point, tip point)."""
+    hi = (_rot(polar(PFC_RO, LUG_HALF), ang), _rot((LUG_TIP_R, LUG_TIP_W), ang))
+    lo = (_rot(polar(PFC_RO, -LUG_HALF), ang), _rot((LUG_TIP_R, -LUG_TIP_W), ang))
+    return hi, lo
+
+
+def jaw_half_outline(diag, which):
+    """Half of the ribbed jaw on diagonal `diag`; which=-1 (towards the lower lug) or +1."""
+    if which < 0:
+        lug_ang = diag - 45
+        p_out, p_tip = lug_sides(lug_ang)[0]           # upper edge of the lower lug
+        p_out, p_tip = _offset_line(p_tip, p_out, -GAPC)[::-1]
+        a_split = diag - 0.25
+    else:
+        lug_ang = diag + 45
+        p_out, p_tip = lug_sides(lug_ang)[1]           # lower edge of the upper lug
+        p_out, p_tip = _offset_line(p_tip, p_out, GAPC)[::-1]
+        a_split = diag + 0.25
+    q_in = _line_circle(p_tip, p_out, JAW_RI)
+    q_out = _line_circle(p_tip, p_out, PFC_RO)
+    def near(a):  # same turn as the split line, so arcs take the short way
+        return a_split + (a - a_split + 180.0) % 360.0 - 180.0
+    a_in = near(math.degrees(math.atan2(q_in[1], q_in[0])))
+    a_out = near(math.degrees(math.atan2(q_out[1], q_out[0])))
+    inner = arc(JAW_RI, a_in, a_split, 10)
+    outer = arc(PFC_RO, a_split, a_out, 10)
+    pts = inner + outer
+    if which > 0:
+        pts = pts[::-1]
+    return pts
 
 
 def build_pfc(M):
-    rings = build_ring("ringL", -X_RING, -X_FL - 0.002, M) + build_ring("ringR", X_FL + 0.002, X_RING, M)
+    jaws, lugs, caps = [], [], []
+    # ribbed jaws (eight halves) spanning both flanges
+    for d in FLANGE_ANG:
+        for which in (-1, 1):
+            o = prism(f"jaw{d}{'a' if which < 0 else 'b'}", jaw_half_outline(d, which), -JAW_X, JAW_X)
+            # axial ribs on the outer face and face ribs, as on the real jaws
+            mid = d + which * 8
+            for k in range(-3, 4):
+                g = box("rib", (2 * JAW_X + 0.2, 0.03, 0.07),
+                        (0, *polar(PFC_RO, mid + k * 2.0)), (math.radians(mid + k * 2.0), 0, 0))
+                boolean(o, g)
+            set_mat(o, M["machined_jaw"])
+            set_origin_center(o)
+            bevel(o, 0.012, weighted=False)
+            jaws.append(o)
+    # V lug plates on both faces with two socket cap screws each
+    base = lug_outline()
+    for side in (-1, 1):
+        for a in PFC_ANG:
+            pts = [_rot(p, a) for p in base]
+            x0, x1 = sorted((side * X_FL, side * X_RING))
+            o = prism(f"lug{a}{'L' if side < 0 else 'R'}", pts, x0 + side * 0.001, x1)
+            y, z = polar(PFC_BC, a)
+            h = cyl_x("lh", PFC_STUD_R * 1.12, x0 - 0.1, x1 + 0.1, verts=32, y=y, z=z)
+            boolean(o, h)
+            set_mat(o, M["machined_face"])
+            set_origin_center(o)
+            bevel(o, 0.014)
+            for da in (-LUG_HALF + 8, LUG_HALF - 8):
+                cy, cz = polar(PFC_RO - 0.32, a + da)
+                xf = side * X_RING
+                cap = cyl_x("cap", 0.085, xf - 0.02 * side, xf + 0.012 * side, verts=24, y=cy, z=cz)
+                sock = cyl_x("sock", 0.04, xf - 0.05, xf + 0.05, verts=6, y=cy, z=cz)
+                boolean(cap, sock)
+                set_mat(cap, M["dark"])
+                bpy.context.view_layer.update()
+                cap.parent = o
+                cap.matrix_parent_inverse = o.matrix_world.inverted()
+            lugs.append(o)
     studs = []
     for i, a in enumerate(PFC_ANG):
         studs.append(stud_assembly(f"pfc{i}", a, PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T,
                                    X_RING, 0.22, M["blue"], M["blue"]))
-    return rings, studs
+    return jaws, lugs, studs
 
 
 # ------------------------------------------------------------ animation ----
@@ -383,7 +471,7 @@ def key_emit(m, frame, strength):
     b.inputs["Emission Strength"].keyframe_insert("default_value", frame=frame)
 
 
-def animate(studs, rings, pfc_studs, M):
+def animate(studs, jaws, lugs, pfc_studs, M):
     f = sec
     # --- A: torque pulses on existing studs (criss-cross) -----------------
     for k, i in enumerate(REPLACE_ORDER):
@@ -398,36 +486,38 @@ def animate(studs, rings, pfc_studs, M):
         key_emit(M["old_nut"], f(t0 + 0.3), 1.5)
         key_emit(M["old_nut"], f(t0 + 0.7), 0.0)
 
-    # --- B: PFC segments slide in radially, studs in, nuts torqued --------
-    for k, seg in enumerate(rings):
-        home = seg.location.copy()
+    # --- B: jaws, then lug plates, slide in radially; studs in; torque ----
+    def radial_in_out(piece, t_in, t_out, dist=3.2):
+        home = piece.location.copy()
         dirv = Vector((0, home.y, home.z)).normalized()
-        away = home + dirv * 3.5 + Vector((math.copysign(1.2, home.x), 0, 0))
-        t0 = T["B"] + 0.2 + (k % 4) * 0.35 + (0.15 if home.x > 0 else 0)
-        key_hide(seg, 1, True)
-        key_hide(seg, f(t0) - 1, True)
-        key_hide(seg, f(t0), False)
-        key_loc(seg, f(t0), away)
-        key_loc(seg, f(t0 + 1.1), home)
-        # removal in D
-        t1 = T["D"] + 2.6 + (k % 4) * 0.3
-        key_loc(seg, f(t1), home)
-        key_loc(seg, f(t1 + 1.1), away)
-        key_hide(seg, f(t1 + 1.1), False)
-        key_hide(seg, f(t1 + 1.1) + 1, True)
+        away = home + dirv * dist
+        key_hide(piece, 1, True)
+        key_hide(piece, f(t_in) - 1, True)
+        key_hide(piece, f(t_in), False)
+        key_loc(piece, f(t_in), away)
+        key_loc(piece, f(t_in + 1.0), home)
+        key_loc(piece, f(t_out), home)
+        key_loc(piece, f(t_out + 1.0), away)
+        key_hide(piece, f(t_out + 1.0), False)
+        key_hide(piece, f(t_out + 1.0) + 1, True)
+
+    for k, jaw in enumerate(jaws):
+        radial_in_out(jaw, T["B"] + 0.2 + k * 0.15, T["D"] + 3.4 + k * 0.12)
+    for k, lug in enumerate(lugs):
+        radial_in_out(lug, T["B"] + 2.3 + k * 0.15, T["D"] + 2.4 + k * 0.12)
     for k, (root, rod, nuts) in enumerate(pfc_studs):
-        t0 = T["B"] + 2.6 + k * 0.35
+        t0 = T["B"] + 4.3 + k * 0.25
         home = root.location.copy()
         key_hide(root, 1, True)
         key_hide(root, f(t0) - 1, True)
         key_hide(root, f(t0), False)
         key_loc(root, f(t0), home + Vector((-5.0, 0, 0)))
         key_loc(root, f(t0 + 1.0), home)
-        # torque stages: three small nut turns
-        for s, ts in enumerate((5.0, 6.2, 7.4)):
+        # torque stages 30 / 60 / 100 %: three nut turns
+        for st, ts in enumerate((6.2, 7.2, 8.2)):
             for nut in nuts:
-                key_rot(nut, f(T["B"] + ts), (math.radians(s * 40), 0, 0))
-                key_rot(nut, f(T["B"] + ts + 0.6), (math.radians((s + 1) * 40), 0, 0))
+                key_rot(nut, f(T["B"] + ts), (math.radians(st * 40), 0, 0))
+                key_rot(nut, f(T["B"] + ts + 0.6), (math.radians((st + 1) * 40), 0, 0))
         # D: loosen and withdraw
         t1 = T["D"] + 0.3 + k * 0.3
         for nut in nuts:
@@ -481,17 +571,17 @@ def camera_rig():
 
     f = sec
     shots = [  # (time, camera location, target location)
-        (0.0, (10.5, -9.5, 4.6), (0, 0, 0)),
-        (3.5, (7.5, -8.0, 3.2), (0, 0, 0)),
-        (8.5, (5.5, -8.2, 4.2), (0, 0, 0.2)),
-        (12.0, (-6.5, -7.2, 3.6), (0, 0, 0.2)),
-        (17.5, (-6.5, -4.5, 4.0), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[0]]))),
-        (21.5, (-6.5, -5.0, -2.5), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[1]]))),
-        (25.5, (-6.5, -6.0, 3.5), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[2]]))),
-        (29.5, (-6.5, -3.5, -3.0), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[3]]))),
-        (33.5, (-8.0, -8.5, 3.6), (0, 0, 0)),
-        (39.5, (8.5, -8.0, 2.6), (0, 0, 0)),
-        (43.0, (10.0, -7.0, 2.2), (0, 0, 0)),
+        (0.0, (11.5, -10.5, 5.0), (0, 0, 0)),
+        (3.5, (8.0, -8.8, 3.4), (0, 0, 0)),
+        (8.5, (6.5, -9.5, 4.6), (0, 0, 0.2)),
+        (12.5, (-7.8, -8.6, 4.2), (0, 0, 0.2)),
+        (17.5, (-7.2, -5.2, 4.4), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[0]]))),
+        (21.5, (-7.2, -5.6, -2.8), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[1]]))),
+        (25.5, (-7.2, -6.6, 3.8), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[2]]))),
+        (29.5, (-7.2, -4.0, -3.2), (0, *polar(BC_R, FLANGE_ANG[REPLACE_ORDER[3]]))),
+        (33.5, (-9.0, -9.5, 4.0), (0, 0, 0)),
+        (39.5, (9.0, -8.6, 2.8), (0, 0, 0)),
+        (43.0, (10.5, -7.6, 2.4), (0, 0, 0)),
     ]
     for t, cl, tl in shots:
         key_loc(cam, f(t), cl)
@@ -568,7 +658,9 @@ def build_scene():
     clear()
     M = dict(
         pipe=mat("pipe", srgb("#8C949E"), metal=0.85, rough=0.38),
-        flange=mat("flange", srgb("#2C3038"), metal=0.6, rough=0.45, coat=0.3),
+        flange=mat("flange", srgb("#17191E"), metal=0.3, rough=0.5, coat=0.35),
+        machined_jaw=mat("machined_jaw", srgb("#C4C9D0"), metal=1.0, rough=0.4, aniso=0.6),
+        machined_face=mat("machined_face", srgb("#B9BEC6"), metal=1.0, rough=0.42, aniso=0.6),
         gasket=mat("gasket", srgb("#20242C"), rough=0.7),
         machined=mat("machined", srgb("#D2D7DE"), metal=1.0, rough=0.3, aniso=0.5),
         blue=mat("blue", srgb("#1A47B8"), metal=0.0, rough=0.42, coat=0.15),
@@ -580,10 +672,10 @@ def build_scene():
     )
     build_joint(M)
     studs = build_flange_studs(M)
-    rings, pfc_studs = build_pfc(M)
+    jaws, lugs, pfc_studs = build_pfc(M)
     camera_rig()
     lights_world()
-    animate(studs, rings, pfc_studs, M)
+    animate(studs, jaws, lugs, pfc_studs, M)
     linear_all(bpy.data.materials["fluid"].node_tree)  # constant flow speed
     sc = bpy.context.scene
     sc.frame_start, sc.frame_end = 1, sec(T["end"]) - 1

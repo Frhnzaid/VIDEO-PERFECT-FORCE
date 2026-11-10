@@ -715,9 +715,9 @@ def pfc3d_overlay(c, t, dur):
             fy += 26
 
     # torque stages in B
-    if T3["B"] + 4.8 <= t < T3["C"]:
-        a = ease_out_cubic(prog(t, T3["B"] + 4.8, T3["B"] + 5.3)) * (1 - prog(t, T3["C"] - 0.4, T3["C"]))
-        stage = 0 if t < T3["B"] + 6.2 else 1 if t < T3["B"] + 7.4 else 2
+    if T3["B"] + 5.8 <= t < T3["C"]:
+        a = ease_out_cubic(prog(t, T3["B"] + 5.8, T3["B"] + 6.3)) * (1 - prog(t, T3["C"] - 0.4, T3["C"]))
+        stage = 0 if t < T3["B"] + 7.2 else 1 if t < T3["B"] + 8.2 else 2
         xr = W - 170
         _panel(c, xr - 700, 1590, 700, 310, a)
         draw_text(c, "PFC STUD BOLT TORQUE", xr - 640, 1680, font("cond_semi", 50), STEEL,
