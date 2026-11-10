@@ -38,6 +38,7 @@ GFX_FUNCS = {
     "lower_third": (gfx.lower_third, False),
     "callout": (gfx.callout, False),
     "how_it_works": (gfx.how_it_works, True),
+    "pfc3d_overlay": (gfx.pfc3d_overlay, False),
 }
 
 
@@ -99,7 +100,7 @@ def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0):
             f"atrim=duration={total:.3f}," + tail)
 
 
-def build(name, src, out, work, logo_path, crf, preset):
+def build(name, src, out, work, logo_path, crf, preset, frames3d=None):
     tl = TIMELINES[name]
     os.makedirs(work, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -117,12 +118,24 @@ def build(name, src, out, work, logo_path, crf, preset):
 
     t = 0.0
     joins = []
+    extra_overlays = []
     # ---- picture: main sequence ------------------------------------------
     for i, item in enumerate(tl["sequence"]):
         if item["type"] == "src":
             idx = add_input("-ss", f"{item['in']:.3f}", "-to", f"{item['out']:.3f}", "-i", src)
             filters.append(f"[{idx}:v]{GRADE},setpts=PTS-STARTPTS[v{i}]")
             dur = item["out"] - item["in"]
+        elif item["type"] == "frames3d":
+            # Blender PNG sequence (pfc3d.py), upscaled to UHD, with its text overlay
+            if not frames3d or not os.path.isdir(frames3d):
+                raise SystemExit("this timeline needs --frames3d DIR (output of pfc3d.py)")
+            dur = item["dur"]
+            idx = add_input("-framerate", str(FPS), "-start_number", "1",
+                            "-i", os.path.join(frames3d, "f_%05d.png"))
+            filters.append(f"[{idx}:v]scale={W}:{H}:flags=lanczos,unsharp=5:5:0.4,"
+                           f"setsar=1,fps={FPS},format=yuv420p,trim=duration={dur:.3f},"
+                           f"setpts=PTS-STARTPTS[v{i}]")
+            extra_overlays.append({"type": "pfc3d_overlay", "at": t, "dur": dur})
         else:
             dur = item["dur"]
             path = os.path.join(work, f"{item['type']}_{name}_{dur:.2f}.mp4")
@@ -144,7 +157,7 @@ def build(name, src, out, work, logo_path, crf, preset):
         if item["type"] == "src":
             src_map.append((item["in"], item["out"], acc))
         acc += d
-    overlays = []
+    overlays = list(extra_overlays)
     for ov in tl.get("overlays", []):
         ov = dict(ov)
         if "src_at" in ov:
@@ -200,8 +213,9 @@ def main():
     ap.add_argument("--logo", default=default_logo)
     ap.add_argument("--crf", type=int, default=17)
     ap.add_argument("--preset", default="medium")
+    ap.add_argument("--frames3d", default=None, help="PNG frames from pfc3d.py")
     a = ap.parse_args()
-    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset)
+    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset, a.frames3d)
 
 
 if __name__ == "__main__":

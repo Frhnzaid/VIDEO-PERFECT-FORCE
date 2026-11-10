@@ -14,7 +14,7 @@ New-timeline mapping for the full edit:
   part 2 (src 205.17-355.04): new = src - 11.25
 
 """
-from gfx import SEQ_TOTAL
+from gfx import PFC3D_TOTAL, SEQ_TOTAL
 
 TIMELINES = {
     # ~15.75 s style preview: intro -> wipe -> first installation shots
@@ -33,11 +33,11 @@ TIMELINES = {
         "audio_start": 0.0,
     },
 
-    # full client edit, ~6:21
+    # full client edit, ~6:35 (3D how-it-works)
     "full": {
         "sequence": [
             {"type": "intro", "dur": 6.0},
-            {"type": "how_it_works", "dur": SEQ_TOTAL},
+            {"type": "frames3d", "dur": PFC3D_TOTAL},   # 3D how-it-works (pfc3d.py)
             {"type": "src", "in": 12.25, "out": 200.17},
             {"type": "src", "in": 205.17, "out": 355.04},
             {"type": "outro", "dur": 8.0},
@@ -72,4 +72,12 @@ TIMELINES = {
         ],
         "audio_start": 0.0,
     },
+
+    # same edit with the 2D schematic explainer (no Blender frames needed)
+    "full2d": None,
 }
+
+TIMELINES["full2d"] = dict(TIMELINES["full"])
+TIMELINES["full2d"]["sequence"] = [
+    {"type": "how_it_works", "dur": SEQ_TOTAL} if it["type"] == "frames3d" else it
+    for it in TIMELINES["full"]["sequence"]]
