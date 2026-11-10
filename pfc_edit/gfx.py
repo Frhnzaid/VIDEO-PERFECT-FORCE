@@ -655,21 +655,25 @@ def how_it_works(c, t, dur):
 
 
 # ------------------------------------------------- 3D animation overlay ----
-# Phase times must match pfc3d.T
-PFC3D_T = dict(A=3.5, B=8.5, C=17.5, D=33.5, hero=39.5, end=43.0)
-PFC3D_TOTAL = PFC3D_T["end"]
+from pfc_steps import (B8_ROLL, B8_STEP, B8_T0, C10_SPAN, PHASES,  # noqa: E402
+                       S as STEP_T, STEPS, TOTAL as PFC3D_TOTAL)
 
 
 def _panel(c, x, y, w, h, alpha):
-    p = paint(NAVY, 0.78 * alpha)
-    c.drawRect(skia.Rect(x, y, x + w, y + h), p)
+    c.drawRect(skia.Rect(x, y, x + w, y + h), paint(NAVY, 0.8 * alpha))
     c.drawRect(skia.Rect(x, y, x + 12, y + h), paint(RED, alpha))
 
 
+def _badge(c, text, x, y, alpha, color=TEAL):
+    f = font("cond_bold", 64)
+    w = text_width(text, f, 8) + 80
+    c.drawRect(skia.Rect(x - w, y, x, y + 110), paint(color, 0.92 * alpha))
+    draw_text(c, text, x - w + 40, y + 80, f, NAVY, alpha=alpha, tracking=8)
+
+
 def pfc3d_overlay(c, t, dur):
-    T3 = PFC3D_T
     # title, top-left
-    head = ease_out_cubic(prog(t, 0.2, 1.0)) * (1 - prog(t, T3["A"] - 0.4, T3["A"]) * 0.0)
+    head = ease_out_cubic(prog(t, 0.2, 1.0))
     draw_text(c, "HOW IT WORKS", 170, 230, font("cond_semi", 60), TEAL_LIGHT, alpha=head,
               tracking=12, shadow=True)
     draw_text(c, "HOT BOLTING SEQUENCE USING PFC", 166, 350, font("cond_bold", 124), WHITE,
@@ -684,82 +688,123 @@ def pfc3d_overlay(c, t, dur):
     x1 = W - 170
     c.drawRect(skia.Rect(x1 - tw - 150, 175, x1, 275), paint(NAVY, 0.78 * li))
     c.drawCircle(x1 - tw - 95, 225, 20, paint(TEAL_LIGHT, li))
-    c.drawCircle(x1 - tw - 95, 225, 20 + 18 * pulse, paint(TEAL_LIGHT, li * (1 - pulse) * 0.8, stroke=5))
+    c.drawCircle(x1 - tw - 95, 225, 20 + 18 * pulse,
+                 paint(TEAL_LIGHT, li * (1 - pulse) * 0.8, stroke=5))
     draw_text(c, label, x1 - tw - 50, 245, fx, WHITE, alpha=li, tracking=6)
 
-    # phase panel, bottom-left
-    phases = [("A", T3["A"], T3["B"]), ("B", T3["B"], T3["C"]), ("C", T3["C"], T3["D"]),
-              ("D", T3["D"], T3["hero"])]
-    for idx, (L, a, b) in enumerate(phases):
-        if not (a <= t < b + 0.01):
+    # step panel, bottom-left: phase line, SOP step no., title, detail
+    for key, ph, no, a, b, title, detail in STEPS:
+        if ph is None or not (a <= t < b + 0.01):
             continue
         local, d = t - a, b - a
-        al = ease_out_cubic(prog(local, 0.0, 0.6)) * (1 - prog(local, d - 0.35, d))
-        _, title, _, bullets = SEQ_PHASES[idx]
-        fb = font("med", 50)
-        lines = [wrap(x, fb, 1250) for x in bullets]
-        h = 250 + sum(len(l) * 64 + 26 for l in lines)
-        x0, y1 = 170 - (1 - al) * 60, 1900
+        al = ease_out_cubic(prog(local, 0.0, 0.45)) * (1 - prog(local, d - 0.25, d))
+        pidx = "ABCD".index(ph)
+        fb = font("med", 52)
+        lines = wrap(detail, fb, 1500)
+        h = 330 + len(lines) * 66
+        x0, y1 = 170 - (1 - al) * 50, 1900
         y0 = y1 - h
-        _panel(c, x0, y0, 1460, h, al)
-        c.drawRect(skia.Rect(x0 + 60, y0 + 50, x0 + 190, y0 + 180), paint(TEAL, al))
-        draw_text(c, L, x0 + 125, y0 + 160, font("cond_bold", 116), NAVY, alpha=al, align="center")
-        draw_text(c, title, x0 + 230, y0 + 150, font("cond_bold", 88), WHITE, alpha=al, tracking=3)
-        fy = y0 + 260
-        for i, ls in enumerate(lines):
-            ab = al * ease_out_cubic(prog(local, 0.3 + i * 0.3, 0.9 + i * 0.3))
-            c.drawRect(skia.Rect(x0 + 64, fy - 26, x0 + 80, fy - 10), paint(RED, ab))
-            for line in ls:
-                draw_text(c, line, x0 + 108, fy, fb, WHITE, alpha=ab)
-                fy += 64
-            fy += 26
+        _panel(c, x0, y0, 1720, h, al)
+        draw_text(c, f"{ph}  \u00b7  {PHASES[pidx][1]}", x0 + 60, y0 + 80, font("cond_semi", 50),
+                  TEAL_LIGHT, alpha=al, tracking=8)
+        c.drawRect(skia.Rect(x0 + 60, y0 + 115, x0 + 200, y0 + 235), paint(TEAL, al))
+        draw_text(c, str(no), x0 + 130, y0 + 215, font("cond_bold", 104), NAVY, alpha=al,
+                  align="center")
+        draw_text(c, title.upper(), x0 + 240, y0 + 212, font("cond_bold", 96), WHITE, alpha=al,
+                  tracking=3)
+        fy = y0 + 300
+        ad = al * ease_out_cubic(prog(local, 0.3, 0.8))
+        for line in lines:
+            draw_text(c, line, x0 + 62, fy, fb, WHITE, alpha=ad)
+            fy += 66
 
-    # torque stages in B
-    if T3["B"] + 5.8 <= t < T3["C"]:
-        a = ease_out_cubic(prog(t, T3["B"] + 5.8, T3["B"] + 6.3)) * (1 - prog(t, T3["C"] - 0.4, T3["C"]))
-        stage = 0 if t < T3["B"] + 7.2 else 1 if t < T3["B"] + 8.2 else 2
-        xr = W - 170
-        _panel(c, xr - 700, 1590, 700, 310, a)
-        draw_text(c, "PFC STUD BOLT TORQUE", xr - 640, 1680, font("cond_semi", 50), STEEL,
+    xr = W - 170
+    # B8 torque stages
+    if B8_T0 - 0.1 <= t < STEP_T["B8"][1]:
+        a = ease_out_cubic(prog(t, B8_T0 - 0.1, B8_T0 + 0.4)) * (1 - prog(t, STEP_T["B8"][1] - 0.3,
+                                                                          STEP_T["B8"][1]))
+        n = int((t - B8_T0) / B8_STEP) if t >= B8_T0 else 0
+        stage = min(2, n // 4)
+        rolling = t >= B8_ROLL
+        _panel(c, xr - 760, 1560, 760, 340, a)
+        draw_text(c, "PFC STUD BOLT TORQUE", xr - 700, 1650, font("cond_semi", 50), STEEL,
                   alpha=a, tracking=6)
-        for i, s in enumerate(("30%", "60%", "100%")):
+        for i, s_ in enumerate(("30%", "60%", "100%")):
             on = i <= stage
-            draw_text(c, s, xr - 640 + i * 210, 1840, font("cond_bold", 110),
+            draw_text(c, s_, xr - 700 + i * 220, 1790, font("cond_bold", 110),
                       TEAL_LIGHT if on else STEEL, alpha=a * (1 if on else 0.35))
+        sub = "ROLLING PASS AT 100%" if rolling else f"BOLT No. {(n % 4) + 1}"
+        draw_text(c, sub, xr - 700, 1870, font("cond_semi", 50), WHITE, alpha=a, tracking=6)
 
-    # stud counter in C
-    if T3["C"] <= t < T3["D"]:
-        span = (T3["D"] - T3["C"]) / 4
-        k = min(3, int((t - T3["C"]) / span))
-        a = ease_out_cubic(prog(t, T3["C"], T3["C"] + 0.5)) * (1 - prog(t, T3["D"] - 0.4, T3["D"]))
-        xr = W - 170
-        _panel(c, xr - 700, 1590, 700, 310, a)
-        draw_text(c, "FLANGE STUD BOLT", xr - 640, 1680, font("cond_semi", 50), STEEL, alpha=a,
+    # C10 stud counter
+    c10, c10e = STEP_T["C10"]
+    if c10 <= t < c10e:
+        k = min(3, int((t - c10) / C10_SPAN))
+        a = ease_out_cubic(prog(t, c10, c10 + 0.5)) * (1 - prog(t, c10e - 0.3, c10e))
+        _panel(c, xr - 760, 1560, 760, 340, a)
+        draw_text(c, "FLANGE STUD BOLT", xr - 700, 1650, font("cond_semi", 50), STEEL, alpha=a,
                   tracking=6)
-        draw_text(c, f"{k + 1} / 4", xr - 640, 1850, font("cond_bold", 140), TEAL_LIGHT, alpha=a,
+        draw_text(c, f"{k + 1} / 4", xr - 700, 1810, font("cond_bold", 140), TEAL_LIGHT, alpha=a,
                   tracking=6)
         for i in range(4):
-            done = i < k or (i == k and (t - T3["C"] - k * span) > 3.2)
-            c.drawRect(skia.Rect(xr - 300 + i * 70, 1790, xr - 250 + i * 70, 1840),
+            done = i < k or (i == k and (t - c10 - k * C10_SPAN) > 2.9)
+            c.drawRect(skia.Rect(xr - 330 + i * 70, 1760, xr - 280 + i * 70, 1810),
                        paint(BOLT_NEW if done else STEEL, a * (1 if done else 0.4)))
+        loc = t - c10 - k * C10_SPAN
+        sub = ("SOCKET + NUT STOPPER" if loc < 1.25 else "NEW STUD BOLT" if loc < 3.0
+               else "TORQUE WITH CALIBRATED MTW")
+        draw_text(c, sub, xr - 700, 1870, font("cond_semi", 46), WHITE, alpha=a, tracking=5)
+
+    # sound-check badges
+    for t0, t1 in ((STEP_T["A3"][1] - 1.0, STEP_T["A3"][1]),
+                   (STEP_T["B8"][1] - 0.8, STEP_T["B8"][1]), STEP_T["C11"]):
+        if t0 <= t < t1:
+            a = ease_out_cubic(prog(t, t0, t0 + 0.25)) * (1 - prog(t, t1 - 0.2, t1))
+            _badge(c, "SOUND CHECK", xr, 330, a)
+
+    # wind / workers indicator for C9 and C10
+    w0, w1 = STEP_T["C9"][0], STEP_T["C10"][1]
+    if w0 <= t < w1:
+        a = ease_out_cubic(prog(t, w0, w0 + 0.5)) * (1 - prog(t, w1 - 0.3, w1))
+        y = 520
+        _panel(c, xr - 760, y, 760, 230, a)
+        draw_text(c, "WIND", xr - 700, y + 90, font("cond_bold", 60), TEAL_LIGHT, alpha=a,
+                  tracking=8)
+        shift = (t * 220) % 120
+        for i in range(3):
+            ax = xr - 520 + i * 120 + shift * 0.4
+            p = skia.Path()
+            p.moveTo(ax, y + 50)
+            p.lineTo(ax + 50, y + 70)
+            p.lineTo(ax, y + 90)
+            c.drawPath(p, paint(WHITE, a * (0.5 + 0.2 * i), stroke=10))
+        draw_text(c, "WORKERS UPWIND OF THE FLANGE", xr - 700, y + 180, font("cond_semi", 46),
+                  WHITE, alpha=a, tracking=4)
 
     # hero line
-    if t >= T3["hero"]:
-        a = ease_out_cubic(prog(t, T3["hero"] + 0.3, T3["hero"] + 1.2)) * (1 - prog(t, dur - 0.5, dur))
+    h0 = STEP_T["hero"][0]
+    if t >= h0:
+        a = ease_out_cubic(prog(t, h0 + 0.3, h0 + 1.2)) * (1 - prog(t, dur - 0.5, dur))
         draw_text(c, "4 NEW STUD BOLTS IN PLACE", W / 2, 1760, font("cond_bold", 120), WHITE,
                   alpha=a, tracking=8, align="center", shadow=True)
-        draw_text(c, "PFC REMOVED  ·  LINE KEPT UNDER PRESSURE", W / 2, 1880, font("semi", 64),
+        draw_text(c, "PFC REMOVED  \u00b7  LINE KEPT UNDER PRESSURE", W / 2, 1880, font("semi", 64),
                   TEAL_LIGHT, alpha=a, tracking=10, align="center", shadow=True)
 
-    # progress bar
-    pb = ease_out_cubic(prog(t, 0.6, 1.4)) * (1 - prog(t, T3["hero"], T3["hero"] + 0.6))
+    # phase progress bar
+    pb = ease_out_cubic(prog(t, 0.6, 1.4)) * (1 - prog(t, h0, h0 + 0.6))
     seg_w, gap = (W - 340 - 3 * 30) / 4, 30
-    for i, (L, a0, b0) in enumerate(phases):
+    spans = {}
+    for key, ph, no, a, b, *_ in STEPS:
+        if ph:
+            s0, s1 = spans.get(ph, (a, b))
+            spans[ph] = (min(s0, a), max(s1, b))
+    for i, (L, _, short) in enumerate(PHASES):
+        a0, b0 = spans[L]
         x = 170 + i * (seg_w + gap)
         _rect(c, x, 2040, x + seg_w, 2052, STEEL, 0.35 * pb)
         fill = clamp01((t - a0) / (b0 - a0))
         if fill > 0:
             _rect(c, x, 2040, x + seg_w * fill, 2052, TEAL, pb)
         active = a0 <= t < b0
-        draw_text(c, f"{L}  {SEQ_PHASES[i][2]}", x, 2010, font("cond_semi", 46),
+        draw_text(c, f"{L}  {short}", x, 2010, font("cond_semi", 46),
                   TEAL_LIGHT if active else STEEL, alpha=pb * (1 if active else 0.65), tracking=6)
