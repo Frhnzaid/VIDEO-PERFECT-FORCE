@@ -4,36 +4,44 @@ Steps follow section 8.5 'Hot Bolting Sequence Using PFC' of the client's SOP.
 Times are seconds from the start of the 3D clip (24 fps).
 """
 
-# key, phase, SOP step no., start, end, title, detail
-STEPS = [
-    ("est", None, None, 0.0, 3.0, "", ""),
-    ("A1", "A", 1, 3.0, 7.5, "Apply Molykote",
+# Step lengths are set so each voice-over line (narration.py) fits with a
+# short pause: max(original pace, voice length + 1.2 s).
+# key, phase, SOP step no., duration, title, detail
+_STEPS = [
+    ("est", None, None, 6.4, "", ""),
+    ("A1", "A", 1, 8.9, "Apply Molykote",
      "Anti-seize on the threads and nut faces of the PFC and new stud bolts"),
-    ("A2", "A", 2, 7.5, 13.0, "Measure the flange gap",
+    ("A2", "A", 2, 7.9, "Measure the flange gap",
      "Caliper at four sides, criss-cross. Widest gap marked No. 1"),
-    ("A3", "A", 3, 13.0, 18.0, "Torque existing stud bolts",
+    ("A3", "A", 3, 8.0, "Torque existing stud bolts",
      "100% of the client torque value, then sound-check each bolt"),
-    ("B4", "B", 4, 18.0, 24.5, "Install the PFC",
+    ("B4", "B", 4, 9.4, "Install the PFC",
      "Male and female segments interlocked, slots aligned, fully seated"),
-    ("B5", "B", 5, 24.5, 28.0, "Hand-tighten PFC stud bolts",
+    ("B5", "B", 5, 7.7, "Hand-tighten PFC stud bolts",
      "Until the PFC is in full contact with the flange faces"),
-    ("B6", "B", 6, 28.0, 31.0, "Check the PFC gap",
+    ("B6", "B", 6, 6.8, "Check the PFC gap",
      "Caliper: within tolerance and equal to the measured flange gap"),
-    ("B7", "B", 7, 31.0, 34.5, "Set the grub screws",
+    ("B7", "B", 7, 7.0, "Set the grub screws",
      "No. 1 (widest gap) first, then the others in criss-cross order"),
-    ("B8", "B", 8, 34.5, 44.0, "Torque PFC stud bolts",
+    ("B8", "B", 8, 10.4, "Torque PFC stud bolts",
      "30%, 60%, 100% from No. 1, rolling pass at 100%, then sound-check"),
-    ("C9", "C", 9, 44.0, 46.5, "Position workers upwind",
+    ("C9", "C", 9, 5.5, "Position workers upwind",
      "Check the wind direction before opening the joint"),
-    ("C10", "C", 10, 46.5, 64.5, "Replace stud bolts one at a time",
+    ("C10", "C", 10, 18.0, "Replace stud bolts one at a time",
      "Start opposite the workers. Nut stopper on the far nut. "
      "Torque each new bolt with a calibrated MTW"),
-    ("C11", "C", 11, 64.5, 67.0, "Sound-check new stud bolts",
+    ("C11", "C", 11, 4.4, "Sound-check new stud bolts",
      "All four replacement stud bolts"),
-    ("D12", "D", 12, 67.0, 73.5, "Remove the PFC",
+    ("D12", "D", 12, 7.0, "Remove the PFC",
      "Loosen PFC stud bolts farthest from the workers first, then remove the PFC"),
-    ("hero", None, None, 73.5, 77.0, "", ""),
+    ("hero", None, None, 5.0, "", ""),
 ]
+STEPS = []
+_t = 0.0
+for _k, _ph, _no, _d, _ti, _de in _STEPS:
+    STEPS.append((_k, _ph, _no, round(_t, 3), round(_t + _d, 3), _ti, _de))
+    _t += _d
+DUR = {k: d for k, _, _, d, _, _ in _STEPS}
 
 PHASES = [("A", "FLANGE PREPARATION", "PREPARATION"),
           ("B", "INSTALLATION OF THE PFC", "INSTALL PFC"),
@@ -52,8 +60,9 @@ FLANGE_ORDER_ANG = [45, 225, 135, 315]
 # PFC stud bolts are loosened farthest from the workers first
 PFC_LOOSEN_ANG = [0, 90, 270, 180]
 
-# B8 torque rounds: three stages x four bolts, then a rolling pass
-B8_T0, B8_STEP = S["B8"][0] + 0.2, 0.6
+# B8 torque rounds: three stages x four bolts, then a rolling pass and sound check
+B8_T0 = S["B8"][0] + 0.3
+B8_STEP = (DUR["B8"] - 0.3 - 1.4 - 1.0) / 12
 B8_ROLL = B8_T0 + 12 * B8_STEP
-# C10: one stud bolt every 4.5 s
-C10_SPAN = 4.5
+# C10: one stud bolt per quarter of the step
+C10_SPAN = DUR["C10"] / 4

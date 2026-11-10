@@ -23,8 +23,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pfc_steps import (B8_ROLL, B8_STEP, B8_T0, C10_SPAN, FLANGE_ORDER_ANG,  # noqa: E402
-                       PFC_LOOSEN_ANG, S, SIDE_ORDER, TOTAL)
+from pfc_steps import (B8_ROLL, B8_STEP, B8_T0, C10_SPAN, DUR,  # noqa: E402
+                       FLANGE_ORDER_ANG, PFC_LOOSEN_ANG, S, SIDE_ORDER, TOTAL)
 import bpy
 import bmesh  # noqa: E402  (available once bpy is loaded)
 from mathutils import Vector
@@ -671,9 +671,9 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
         key_hide(back, 1, True)
 
     # ---- A1 Molykote: brush passes over the bolts on the tray -------------
-    key_hide(brush, f(a1 + 0.5), False)
-    for i, (t, x, y) in enumerate(((a1 + 0.5, 0.6, -2.9), (a1 + 2.2, 0.6, -6.4),
-                                   (a1 + 2.4, -0.6, -6.4), (a1 + 4.1, -0.6, -2.9))):
+    key_hide(brush, f(a1 + 0.8), False)
+    for i, (t, x, y) in enumerate(((a1 + 0.8, 0.6, -2.9), (a1 + 4.0, 0.6, -6.4),
+                                   (a1 + 4.3, -0.6, -6.4), (a1 + 7.6, -0.6, -2.9))):
         brush.location = (x, y, -2.05)
         brush.rotation_euler = (math.radians(12), 0, 0)
         brush.keyframe_insert("location", frame=f(t))
@@ -684,9 +684,10 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     a2 = S["A2"][0]
     key_hide(cal, f(a2 + 0.2), False)
     for k, ang in enumerate(SIDE_ORDER):
-        t = a2 + 0.3 + k * 1.25
+        sp = (DUR["A2"] - 0.8) / 4
+        t = a2 + 0.3 + k * sp
         tool_place(cal, f(t), 0.0, ang, FL_R + 0.02)
-        tool_place(cal, f(t + 0.9), 0.0, ang, FL_R + 0.02)
+        tool_place(cal, f(t + sp * 0.75), 0.0, ang, FL_R + 0.02)
         key_scale(nums[ang], f(t + 0.5), 0.001)
         key_scale(nums[ang], f(t + 0.8), 1.0)
     key_hide(cal, f(S["A2"][1] - 0.3), True)
@@ -696,13 +697,13 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     key_scale(mtw, 1, 1.0)
     key_hide(mtw, f(a3 + 0.2), False)
     for k, ang in enumerate(FLANGE_ORDER_ANG):
-        t = a3 + 0.3 + k * 1.05
+        t = a3 + 0.3 + k * (DUR["A3"] - 2.0) / 4
         old_root, old_rod, old_nuts = flange_by_ang[ang][0]
         tool_place(mtw, f(t), x_fnut, ang, BC_R, 0)
         tool_place(mtw, f(t + 0.65), x_fnut, ang, BC_R, 28)
         key_spin(old_nuts[0], f(t), 0)
         key_spin(old_nuts[0], f(t + 0.65), 28)
-    key_hide(mtw, f(a3 + 4.6), True)
+    key_hide(mtw, f(a3 + 0.4 + (DUR["A3"] - 2.0)), True)
     for k in range(4):
         t = S["A3"][1] - 0.9 + k * 0.2
         key_emit(M["old_nut"], f(t), 0.0)
@@ -729,7 +730,7 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     d12 = S["D12"][0]
     out_rank = {a: i for i, a in enumerate(PFC_LOOSEN_ANG)}
     for k, ang in enumerate(SIDE_ORDER):
-        t0 = b4 + 0.2 + k * 1.55
+        t0 = b4 + 0.2 + k * (DUR["B4"] - 1.6) / 4
         t_lug_out = d12 + 3.2 + out_rank[ang] * 0.3
         t_jaw_out = d12 + 4.3 + out_rank[ang] * 0.3
         for d, half in (((ang + 45) % 360, "a"), ((ang - 45) % 360, "b")):
@@ -742,7 +743,7 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     for k, ang in enumerate(SIDE_ORDER):
         root, rod, nuts = pfc_by_ang[ang]
         home = Vector((0, *polar(PFC_BC, ang)))
-        t0 = b5 + 0.15 + k * 0.75
+        t0 = b5 + 0.15 + k * (DUR["B5"] - 1.6) / 4
         key_loc(root, f(t0), rack[root.name])
         key_loc(root, f(t0 + 0.45), home + Vector((-2.4, 0, 0)))
         key_loc(root, f(t0 + 0.85), home)
@@ -759,19 +760,21 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
         jw.location.x = sgn * 1.0
         jw.keyframe_insert("location", frame=f(b6))
     for k, ang in enumerate(SIDE_ORDER[:2]):
-        t = b6 + 0.2 + k * 1.3
+        sp = (DUR["B6"] - 0.6) / 2
+        t = b6 + 0.2 + k * sp
         tool_place(cal, f(t), 0.0, ang, PFC_RO + 0.02)
-        tool_place(cal, f(t + 1.0), 0.0, ang, PFC_RO + 0.02)
+        tool_place(cal, f(t + sp * 0.8), 0.0, ang, PFC_RO + 0.02)
     key_hide(cal, f(S["B6"][1] - 0.2), True)
 
     # ---- B7 grub screws: No. 1 first, then criss-cross --------------------
     b7 = S["B7"][0]
     for k, ang in enumerate(SIDE_ORDER):
-        t = b7 + 0.2 + k * 0.8
+        sp = (DUR["B7"] - 0.6) / 4
+        t = b7 + 0.2 + k * sp
         for side in ("L", "R"):
             for cap in lug_by[f"lug{ang}{side}"].children:
                 key_spin(cap, f(t), 0)
-                key_spin(cap, f(t + 0.7), 360)
+                key_spin(cap, f(t + sp * 0.8), 360)
 
     # ---- B8 torque PFC stud bolts: 30 / 60 / 100 %, rolling pass, sound ---
     key_hide(mtw, f(B8_T0 - 0.1), False)
@@ -882,49 +885,56 @@ def camera_rig():
     def stud(ang):
         return (0, *polar(BC_R, ang))
 
+    def st(k, d=0.0):
+        return S[k][0] + d
+
+    def en(k, d=0.0):
+        return S[k][1] - d
+
+    c10 = S["C10"][0]
     shots = [  # (time, camera location, target location)
         (0.0, (11.5, -10.5, 5.0), (0, 0, 0)),
-        (2.8, (8.0, -9.5, 3.0), (0, -0.8, -0.6)),
+        (en("est", 0.6), (8.0, -9.5, 3.0), (0, -0.8, -0.6)),
         # A1 Molykote on the tray
-        (3.4, (-1.5, -9.8, 1.6), (0, -4.6, -2.4)),
-        (7.2, (2.0, -10.0, 1.2), (0, -4.6, -2.4)),
+        (st("A1", 0.4), (-1.5, -9.8, 1.6), (0, -4.6, -2.4)),
+        (en("A1", 0.3), (2.0, -10.0, 1.2), (0, -4.6, -2.4)),
         # A2 caliper around the flange
-        (7.8, (-9.6, -8.4, 4.2), (0, 0, -0.2)),
-        (12.8, (-9.2, -9.2, 2.4), (0, 0, -0.2)),
+        (st("A2", 0.3), (-9.6, -8.4, 4.2), (0, 0, -0.2)),
+        (en("A2", 0.4), (-9.2, -9.2, 2.4), (0, 0, -0.2)),
         # A3 torque existing bolts
-        (13.4, (-9.0, -6.2, 3.6), (-0.4, 0, 0)),
-        (17.8, (-9.0, -7.0, 2.0), (-0.4, 0, 0)),
+        (st("A3", 0.4), (-9.0, -6.2, 3.6), (-0.4, 0, 0)),
+        (en("A3", 0.4), (-9.0, -7.0, 2.0), (-0.4, 0, 0)),
         # B4 install PFC
-        (18.4, (-9.8, -8.6, 5.2), (0, 0, 0)),
-        (24.3, (-8.8, -9.6, 3.4), (0, 0, 0)),
+        (st("B4", 0.4), (-9.8, -8.6, 5.2), (0, 0, 0)),
+        (en("B4", 0.3), (-8.8, -9.6, 3.4), (0, 0, 0)),
         # B5 PFC stud bolts from the tray
-        (24.8, (-6.5, -11.0, 1.0), (0, -1.6, -0.8)),
-        (27.8, (-8.2, -7.4, 2.8), (0, 0, 0)),
+        (st("B5", 0.3), (-6.5, -11.0, 1.0), (0, -1.6, -0.8)),
+        (en("B5", 0.3), (-8.2, -7.4, 2.8), (0, 0, 0)),
         # B6 caliper check
-        (28.3, (-6.5, -5.8, 5.6), (0, 0, 2.3)),
-        (30.8, (-6.2, -6.4, 3.0), (0, -1.0, 0.0)),
+        (st("B6", 0.3), (-6.5, -5.8, 5.6), (0, 0, 2.3)),
+        (en("B6", 0.3), (-6.2, -6.4, 3.0), (0, -1.0, 0.0)),
         # B7 grub screws
-        (31.3, (-7.4, -3.8, 3.0), (-0.6, 0, 0.6)),
-        (34.3, (-7.4, -4.6, 1.6), (-0.6, 0, 0.0)),
+        (st("B7", 0.3), (-7.4, -3.8, 3.0), (-0.6, 0, 0.6)),
+        (en("B7", 0.3), (-7.4, -4.6, 1.6), (-0.6, 0, 0.0)),
         # B8 torque PFC bolts
-        (34.8, (-12.0, -8.6, 4.8), (-0.6, 0, 0)),
-        (43.8, (-12.0, -7.0, 1.6), (-0.6, 0, 0)),
+        (st("B8", 0.3), (-12.0, -8.6, 4.8), (-0.6, 0, 0)),
+        (en("B8", 0.3), (-12.0, -7.0, 1.6), (-0.6, 0, 0)),
         # C9 workers upwind: wide, high
-        (44.4, (-5.0, -10.0, 8.5), (0, -1.0, 0)),
-        (46.3, (-6.0, -9.0, 6.5), (0, -0.5, 0)),
+        (st("C9", 0.4), (-5.0, -10.0, 8.5), (0, -1.0, 0)),
+        (en("C9", 0.3), (-6.0, -9.0, 6.5), (0, -0.5, 0)),
         # C10 four bolts
-        (46.8, (-8.6, -6.0, 4.6), stud(FLANGE_ORDER_ANG[0])),
-        (51.3, (-8.6, -6.4, -3.0), stud(FLANGE_ORDER_ANG[1])),
-        (55.8, (-8.6, -7.4, 4.0), stud(FLANGE_ORDER_ANG[2])),
-        (60.3, (-8.6, -4.6, -3.4), stud(FLANGE_ORDER_ANG[3])),
+        (c10 + 0.3, (-8.6, -6.0, 4.6), stud(FLANGE_ORDER_ANG[0])),
+        (c10 + 0.3 + C10_SPAN, (-8.6, -6.4, -3.0), stud(FLANGE_ORDER_ANG[1])),
+        (c10 + 0.3 + 2 * C10_SPAN, (-8.6, -7.4, 4.0), stud(FLANGE_ORDER_ANG[2])),
+        (c10 + 0.3 + 3 * C10_SPAN, (-8.6, -4.6, -3.4), stud(FLANGE_ORDER_ANG[3])),
         # C11 sound check
-        (64.8, (-8.6, -6.6, 2.6), (0, 0, 0)),
+        (st("C11", 0.3), (-8.6, -6.6, 2.6), (0, 0, 0)),
         # D12 remove PFC
-        (67.3, (-9.0, -9.5, 4.0), (0, 0, 0)),
-        (73.3, (6.5, -10.0, 3.2), (0, 0, 0)),
+        (st("D12", 0.3), (-9.0, -9.5, 4.0), (0, 0, 0)),
+        (en("D12", 0.1), (6.5, -10.0, 3.2), (0, 0, 0)),
         # hero
-        (75.0, (9.0, -8.6, 2.8), (0, 0, 0)),
-        (77.0, (10.5, -7.6, 2.4), (0, 0, 0)),
+        (st("hero", 1.6), (9.0, -8.6, 2.8), (0, 0, 0)),
+        (en("hero"), (10.5, -7.6, 2.4), (0, 0, 0)),
     ]
     for t, cl, tl in shots:
         key_loc(cam, f(t), cl)

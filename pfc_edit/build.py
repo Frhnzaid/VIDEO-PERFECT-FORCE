@@ -12,6 +12,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gfx  # noqa: E402
+import narration  # noqa: E402
+from pfc_steps import S as STEP_T  # noqa: E402
 from timeline import TIMELINES  # noqa: E402
 
 W, H, FPS = gfx.W, gfx.H, gfx.FPS
@@ -100,7 +102,7 @@ def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0):
             f"atrim=duration={total:.3f}," + tail)
 
 
-def build(name, src, out, work, logo_path, crf, preset, frames3d=None):
+def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=None):
     tl = TIMELINES[name]
     os.makedirs(work, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -185,8 +187,52 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None):
 
     # ---- audio: original track, continuous --------------------------------
     aidx = add_input("-i", src)
-    filters.append(audio_chain(f"{aidx}:a", tl.get("audio_start", 0.0), total,
-                               probe_duration(src, "a"), "aout"))
+    if not voice:
+        filters.append(audio_chain(f"{aidx}:a", tl.get("audio_start", 0.0), total,
+                                   probe_duration(src, "a"), "aout"))
+    else:
+        # music bed, ducked under a voice-over track
+        filters.append(audio_chain(f"{aidx}:a", tl.get("audio_start", 0.0), total,
+                                   probe_duration(src, "a"), "music0"))
+        filters.append("[music0]volume=-7dB[music1]")
+        starts = {}
+        acc = 0.0
+        for item in tl["sequence"]:
+            d = item["out"] - item["in"] if item["type"] == "src" else item["dur"]
+            starts.setdefault(item["type"], acc)
+            acc += d
+        vo_dir = os.path.join(work, "vo")
+        narration.synth(voice, vo_dir)
+        placed = []
+        for ln in narration.LINES:
+            if "at" in ln:
+                at = ln["at"]
+            elif "outro" in ln:
+                at = starts["outro"] + ln["outro"]
+            elif "step" in ln:
+                if "frames3d" not in starts:
+                    continue  # 2D variant has no 3D steps
+                at = starts["frames3d"] + STEP_T[ln["step"]][0] + ln["off"]
+            else:
+                at = None
+                for a_, b_, st_ in src_map:
+                    if a_ <= ln["src_at"] < b_:
+                        at = st_ + ln["src_at"] - a_
+                if at is None:
+                    raise ValueError(f"narration {ln['id']}: src_at outside the edit")
+            placed.append((at, os.path.join(vo_dir, ln["id"] + ".wav")))
+        vlabels_a = []
+        for k, (at, path) in enumerate(placed):
+            vi = add_input("-i", path)
+            ms = int(round(at * 1000))
+            filters.append(f"[{vi}:a]aresample=48000,adelay={ms}|{ms},apad[vo{k}]")
+            vlabels_a.append(f"[vo{k}]")
+        filters.append("".join(vlabels_a) + f"amix=inputs={len(vlabels_a)}:normalize=0:"
+                       f"duration=longest,atrim=duration={total:.3f},asplit=2[vo_mix][vo_sc]")
+        filters.append("[music1][vo_sc]sidechaincompress=threshold=0.02:ratio=6:attack=40:"
+                       "release=600:makeup=1[music_d]")
+        filters.append("[music_d][vo_mix]amix=inputs=2:normalize=0:duration=first,"
+                       "alimiter=limit=0.89,aformat=channel_layouts=stereo[aout]")
 
     graph = os.path.join(work, f"graph_{name}.txt")
     with open(graph, "w") as f:
@@ -214,8 +260,9 @@ def main():
     ap.add_argument("--crf", type=int, default=17)
     ap.add_argument("--preset", default="medium")
     ap.add_argument("--frames3d", default=None, help="PNG frames from pfc3d.py")
+    ap.add_argument("--voice", default=None, help="Piper voice model (.onnx) for the voice-over")
     a = ap.parse_args()
-    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset, a.frames3d)
+    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset, a.frames3d, a.voice)
 
 
 if __name__ == "__main__":
