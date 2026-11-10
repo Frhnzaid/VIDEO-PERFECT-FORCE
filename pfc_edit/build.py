@@ -71,6 +71,34 @@ def render_gfx(kind, dur, path, logo, **kw):
     return path
 
 
+def probe_duration(path, stream="a"):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", f"{stream}:0",
+                        "-show_entries", "stream=duration", "-of", "csv=p=0", path],
+                       capture_output=True, text=True, check=True)
+    return float(r.stdout.strip())
+
+
+def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0):
+    """Original soundtrack for `total` seconds.
+
+    When the new edit is longer than the source track, a section of the music is
+    repeated with a crossfade at `splice_at`, so the song still ends on its own
+    outro instead of cutting to silence.
+    """
+    tail = (f"afade=t=in:st=0:d=0.6,"
+            f"afade=t=out:st={max(total - 2.5, 0):.3f}:d=2.5[{out_label}]")
+    avail = src_dur - a0
+    if total <= avail:
+        return (f"[{inp}]atrim=start={a0}:duration={total:.3f},asetpts=PTS-STARTPTS," + tail)
+    # len = (splice_at - a0) + (src_dur - y) - xfade == total
+    y = splice_at - (total - avail) - xfade
+    return (f"[{inp}]asplit=2[ma][mb];"
+            f"[ma]atrim=start={a0}:end={splice_at:.3f},asetpts=PTS-STARTPTS[m1];"
+            f"[mb]atrim=start={y:.3f},asetpts=PTS-STARTPTS[m2];"
+            f"[m1][m2]acrossfade=d={xfade}:c1=tri:c2=tri,"
+            f"atrim=duration={total:.3f}," + tail)
+
+
 def build(name, src, out, work, logo_path, crf, preset):
     tl = TIMELINES[name]
     os.makedirs(work, exist_ok=True)
@@ -143,11 +171,9 @@ def build(name, src, out, work, logo_path, crf, preset):
     filters.append(f"[{cur}]format=yuv420p[vout]")
 
     # ---- audio: original track, continuous --------------------------------
-    a0 = tl.get("audio_start", 0.0)
     aidx = add_input("-i", src)
-    filters.append(
-        f"[{aidx}:a]atrim=start={a0}:duration={total:.3f},asetpts=PTS-STARTPTS,"
-        f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(total - 2.5, 0):.3f}:d=2.5[aout]")
+    filters.append(audio_chain(f"{aidx}:a", tl.get("audio_start", 0.0), total,
+                               probe_duration(src, "a"), "aout"))
 
     graph = os.path.join(work, f"graph_{name}.txt")
     with open(graph, "w") as f:
