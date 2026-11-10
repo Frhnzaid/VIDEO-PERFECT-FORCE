@@ -54,6 +54,8 @@ GAPC = 0.012                               # clearance between PFC parts
 PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T = 2.42, 0.14, 0.44, 0.30
 X_FL = GAP / 2 + FL_T                      # outer face of each flange
 X_RING = X_FL + LUG_T                      # outer face of the lug plates
+RING_GAP = 0.10                            # half the gap left between the two rings
+REBATE_R = FL_R + 0.03                     # step on the flange side that seats over the flange OD
 X_JAW = X_FL + LUG_T * 0.62               # jaw bars set lower than the lug blocks
 
 FLANGE_ANG = [45, 135, 225, 315]           # flange studs on the diagonals
@@ -399,11 +401,20 @@ def build_pfc(M):
     for side in (-1, 1):
         sl = "L" if side < 0 else "R"
         xf = side * X_RING                     # outer face of the lugs
-        x0 = side * (X_FL + 0.001)
+        # flange side: outside the flange OD each part reaches in towards the
+        # other ring (leaving a small gap); inside it, a stepped rebate sits on
+        # the flange face (section A-A of the drawing)
+        xg = side * RING_GAP
+
+        def rebate(o, side=side):
+            cut = cyl_x("rebate", REBATE_R, *sorted((side * (RING_GAP - 0.1), side * (X_FL + 0.001))),
+                        verts=160)
+            boolean(o, cut)
         for d in FLANGE_ANG:
             for which in (-1, 1):
                 o = prism(f"jaw{d}{'a' if which < 0 else 'b'}{sl}",
-                          jaw_half_outline(d, which), *sorted((x0, side * X_JAW)))
+                          jaw_half_outline(d, which), *sorted((xg, side * X_JAW)))
+                rebate(o)
                 set_mat(o, M["machined_jaw"])
                 set_origin_center(o)
                 bevel(o, 0.014, weighted=False)
@@ -411,8 +422,9 @@ def build_pfc(M):
         base = lug_outline()
         for a in PFC_ANG:
             pts = [_rot(p, a) for p in base]
-            x_lo, x_hi = sorted((x0, xf))
+            x_lo, x_hi = sorted((xg, xf))
             o = prism(f"lug{a}{sl}", pts, x_lo, x_hi)
+            rebate(o)
             y, z = polar(PFC_BC, a)
             h = cyl_x("lh", PFC_STUD_R * 1.12, x_lo - 0.1, x_hi + 0.1, verts=32, y=y, z=z)
             boolean(o, h)
