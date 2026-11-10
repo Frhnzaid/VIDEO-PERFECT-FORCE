@@ -45,10 +45,10 @@ PFC_RO = 2.9                               # PFC outer radius
 # plan shape from the client's assembly drawing (proportions ours, not its sizes):
 # straight jaw channels on the diagonals, square lug blocks between them
 CH_HW = 0.72                               # jaw channel half-width
-LUG_TIP_R = 1.15                           # chamfered inner corner of each lug
+LUG_TIP_R, LUG_TIP_W = 1.04, 0.30          # flat tip of each lug's V nose (photos, drawing)
 GRUB_DA = 21.0                             # grub screws +/- this angle from the lug axis
 LUG_T = 0.80                               # ring thickness (axial), photo 9
-JAW_RI = 1.5                               # jaw inner edge: clears the flange nuts
+JAW_RI = FL_R + 0.03                       # jaw ends hug the flange OD (photos)
 POCKET = 0.0                               # PFC nuts sit on the lug face (drawing)
 GAPC = 0.012                               # clearance between PFC parts
 PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T = 2.42, 0.14, 0.44, 0.30
@@ -367,18 +367,21 @@ def _line_circle(p0, p1, r):
 
 
 def lug_outline():
-    """Lug block centred on angle 0, as in the assembly drawing: a quadrant
-    bounded by the two straight jaw channels (on the diagonals), the outer
-    rim, and a flat-chamfered corner pointing at the pipe."""
+    """Lug block centred on angle 0 (assembly drawing and photos): bounded by
+    the two straight jaw channels on the diagonals and the outer rim; past the
+    jaw ends it narrows into a V nose with a flat tip that reaches in over the
+    flange face between the flange nuts."""
     h = CH_HW + GAPC
-    s2 = math.sqrt(2.0)
-    tip_hi = (LUG_TIP_R, LUG_TIP_R - h * s2)
-    tip_lo = (LUG_TIP_R, -(LUG_TIP_R - h * s2))
-    out_hi = _line_circle(tip_hi, (tip_hi[0] + 1, tip_hi[1] + 1), PFC_RO)
-    out_lo = _line_circle(tip_lo, (tip_lo[0] + 1, tip_lo[1] - 1), PFC_RO)
+    t = math.sqrt(JAW_RI ** 2 - h * h)
+    c = math.sqrt(0.5)
+    brk_hi = (c * (t + h), c * (t - h))          # channel edge meets the jaw end
+    brk_lo = (brk_hi[0], -brk_hi[1])
+    tip_hi, tip_lo = (LUG_TIP_R, LUG_TIP_W), (LUG_TIP_R, -LUG_TIP_W)
+    out_hi = _line_circle(brk_hi, (brk_hi[0] + 1, brk_hi[1] + 1), PFC_RO)
+    out_lo = _line_circle(brk_lo, (brk_lo[0] + 1, brk_lo[1] - 1), PFC_RO)
     a_hi = math.degrees(math.atan2(out_hi[1], out_hi[0]))
     a_lo = math.degrees(math.atan2(out_lo[1], out_lo[0]))
-    return [tip_lo] + arc(PFC_RO, a_lo, a_hi) + [tip_hi]
+    return [tip_lo, brk_lo] + arc(PFC_RO, a_lo, a_hi) + [brk_hi, tip_hi]
 
 
 def jaw_half_outline(diag, which):
@@ -415,6 +418,12 @@ def build_pfc(M):
                 o = prism(f"jaw{d}{'a' if which < 0 else 'b'}{sl}",
                           jaw_half_outline(d, which), *sorted((xg, side * X_JAW)))
                 rebate(o)
+                for k in range(3):  # grooves along the jaw (photos)
+                    off = which * (0.14 + k * 0.2)
+                    g = box("jg", (0.06, PFC_RO - JAW_RI + 0.4, 0.05),
+                            (side * X_JAW, *_rot(((PFC_RO + JAW_RI) / 2, off), d)),
+                            (math.radians(d), 0, 0))
+                    boolean(o, g)
                 set_mat(o, M["machined_jaw"])
                 set_origin_center(o)
                 bevel(o, 0.014, weighted=False)
