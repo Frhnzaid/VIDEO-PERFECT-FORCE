@@ -45,7 +45,8 @@ PFC_RO = 2.9                               # PFC outer radius
 LUG_HALF = 29.0                            # lug outer arc half-angle (deg)
 LUG_TIP_R, LUG_TIP_W = 1.15, 0.13          # flat tip of the V, half-width
 LUG_T = 0.42                               # lug plate thickness (axial)
-JAW_RI = FL_R + 0.03                       # jaws sit just outside the flange OD
+JAW_RI = 1.5                               # jaw inner edge: clears the flange nuts
+POCKET = 0.17                              # U-pocket for the PFC nut in each lug
 GAPC = 0.012                               # clearance between PFC parts
 PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T = 2.42, 0.14, 0.44, 0.30
 X_FL = GAP / 2 + FL_T                      # outer face of each flange
@@ -401,37 +402,50 @@ def jaw_half_outline(diag, which):
 
 
 def build_pfc(M):
-    jaws, lugs, caps = [], [], []
-    # ribbed jaws (eight halves) spanning both flanges
-    for d in FLANGE_ANG:
-        for which in (-1, 1):
-            o = prism(f"jaw{d}{'a' if which < 0 else 'b'}", jaw_half_outline(d, which), -JAW_X, JAW_X)
-            # axial ribs on the outer face and face ribs, as on the real jaws
-            mid = d + which * 8
-            for k in range(-3, 4):
-                g = box("rib", (2 * JAW_X + 0.2, 0.03, 0.07),
-                        (0, *polar(PFC_RO, mid + k * 2.0)), (math.radians(mid + k * 2.0), 0, 0))
-                boolean(o, g)
-            set_mat(o, M["machined_jaw"])
-            set_origin_center(o)
-            bevel(o, 0.012, weighted=False)
-            jaws.append(o)
-    # V lug plates on both faces with two socket cap screws each
-    base = lug_outline()
+    """Two flat PFC rings, one on the outer face of each flange (photos 2, 9).
+    Each ring: four V lug plates (male) and four split, ribbed jaws (female)
+    in one plane. PFC stud bolts cross the gap between the rings outside the
+    flange OD; their nuts sit in U-pockets on the lug faces."""
+    jaws, lugs = [], []
     for side in (-1, 1):
+        sl = "L" if side < 0 else "R"
+        x0, x1 = sorted((side * (X_FL + 0.001), side * X_RING))
+        xf = side * X_RING  # outer face
+        for d in FLANGE_ANG:
+            for which in (-1, 1):
+                o = prism(f"jaw{d}{'a' if which < 0 else 'b'}{sl}",
+                          jaw_half_outline(d, which), x0, x1)
+                mid = d + which * 8
+                for k in range(-3, 4):  # axial grooves on the rim (photo 3)
+                    g = box("rib", (LUG_T + 0.2, 0.03, 0.07),
+                            ((x0 + x1) / 2, *polar(PFC_RO, mid + k * 2.0)),
+                            (math.radians(mid + k * 2.0), 0, 0))
+                    boolean(o, g)
+                for r in (1.86, 2.16, 2.46):  # concentric grooves on the face (photo 1)
+                    ring = cyl_x("gr", r + 0.02, xf - 0.025, xf + 0.025, verts=128)
+                    inner = cyl_x("gri", r - 0.02, xf - 0.1, xf + 0.1, verts=128)
+                    boolean(ring, inner)
+                    boolean(o, ring)
+                set_mat(o, M["machined_jaw"])
+                set_origin_center(o)
+                bevel(o, 0.012, weighted=False)
+                jaws.append(o)
+        base = lug_outline()
         for a in PFC_ANG:
             pts = [_rot(p, a) for p in base]
-            x0, x1 = sorted((side * X_FL, side * X_RING))
-            o = prism(f"lug{a}{'L' if side < 0 else 'R'}", pts, x0 + side * 0.001, x1)
+            o = prism(f"lug{a}{sl}", pts, x0, x1)
             y, z = polar(PFC_BC, a)
             h = cyl_x("lh", PFC_STUD_R * 1.12, x0 - 0.1, x1 + 0.1, verts=32, y=y, z=z)
             boolean(o, h)
+            r0, r1 = PFC_BC - 0.36, PFC_RO + 0.2
+            pk = box("pocket", (2 * POCKET, r1 - r0, 0.62), (xf, *polar((r0 + r1) / 2, a)),
+                     (math.radians(a), 0, 0))
+            boolean(o, pk)
             set_mat(o, M["machined_face"])
             set_origin_center(o)
             bevel(o, 0.014)
-            for da in (-LUG_HALF + 8, LUG_HALF - 8):
+            for da in (-LUG_HALF + 8, LUG_HALF - 8):  # black grub screws
                 cy, cz = polar(PFC_RO - 0.32, a + da)
-                xf = side * X_RING
                 cap = cyl_x("cap", 0.085, xf - 0.02 * side, xf + 0.012 * side, verts=24, y=cy, z=cz)
                 sock = cyl_x("sock", 0.04, xf - 0.05, xf + 0.05, verts=6, y=cy, z=cz)
                 boolean(cap, sock)
@@ -446,7 +460,7 @@ def build_pfc(M):
     studs = []
     for i, a in enumerate(PFC_ANG):
         studs.append(stud_assembly(f"pfc{i}", a, PFC_BC, PFC_STUD_R, PFC_NUT_AF, PFC_NUT_T,
-                                   X_RING, 0.22, M["blue"], M["blue_pfc"]))
+                                   X_RING - POCKET, 0.22, M["blue"], M["blue_pfc"]))
     return jaws, lugs, studs
 
 
@@ -647,7 +661,7 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     flange_by_ang = dict(zip(FLANGE_ANG, studs))
     x_fnut = -(X_FL + NUT_T / 2)            # front flange nut centre
     x_bnut = X_FL + NUT_T / 2               # back flange nut centre
-    x_pnut = -(X_RING + PFC_NUT_T / 2)      # front PFC nut centre
+    x_pnut = -(X_RING - POCKET + PFC_NUT_T / 2)  # front PFC nut centre (in its pocket)
     mtw, sock, ham, cal, brush = (tools[k] for k in ("mtw", "socket", "hammer", "caliper", "brush"))
 
     # ---- tray and the stud bolts waiting on it ----------------------------
@@ -734,7 +748,8 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
         t_lug_out = d12 + 3.2 + out_rank[ang] * 0.3
         t_jaw_out = d12 + 4.3 + out_rank[ang] * 0.3
         for d, half in (((ang + 45) % 360, "a"), ((ang - 45) % 360, "b")):
-            radial(jaw_by[f"jaw{d}{half}"], t0, t_jaw_out)
+            for side in ("L", "R"):
+                radial(jaw_by[f"jaw{d}{half}{side}"], t0, t_jaw_out)
         for side in ("L", "R"):
             radial(lug_by[f"lug{ang}{side}"], t0 + 0.6, t_lug_out)
 
