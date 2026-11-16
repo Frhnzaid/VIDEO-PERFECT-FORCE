@@ -173,20 +173,38 @@ def _ease_in(t, t0, d=0.6):
     return ease_out_cubic(prog(t, t0, t0 + d))
 
 
-def header(c, t, cd, a):
+PANEL_W = 1840   # presentation panel on the left of the 3D shots
+
+
+def header(c, t, cd, a, overlay=False):
+    """Kicker, title and red rule. Returns the y of the rule."""
     head = ease_out_cubic(prog(t, 0.1, 0.8)) * a
     draw_text(c, cd["kicker"], 200 - (1 - head) * 60, 300, font("cond_semi", 62), TEAL_LIGHT,
               alpha=head, tracking=12)
-    draw_text(c, cd["title"], 196 - (1 - head) * 60, 450, font("cond_bold", 150), WHITE,
-              alpha=head, tracking=4)
+    if overlay:
+        ft = font("cond_bold", 132)
+        lines = wrap(cd["title"], ft, PANEL_W - 330)
+        y = 440
+        for line in lines:
+            draw_text(c, line, 196 - (1 - head) * 60, y, ft, WHITE, alpha=head, tracking=4)
+            y += 138
+        rule_y = y - 138 + 55
+    else:
+        draw_text(c, cd["title"], 196 - (1 - head) * 60, 450, font("cond_bold", 150), WHITE,
+                  alpha=head, tracking=4)
+        rule_y = 505
     k = ease_out_expo(prog(t, 0.3, 1.1)) * a
-    c.drawRect(skia.Rect(200, 505, 200 + 240 * k, 515), paint(RED, a))
+    c.drawRect(skia.Rect(200, rule_y, 200 + 240 * k, rule_y + 10), paint(RED, a))
     if cd.get("page"):
         for i in range(4):
-            x = W - 200 - (4 - i) * 100 + 30
+            if overlay:
+                x, y = 200 + i * 100, 1990
+            else:
+                x, y = W - 200 - (4 - i) * 100 + 30, 262
             on = i + 1 == cd["page"]
-            c.drawRect(skia.Rect(x, 262, x + 70, 274),
+            c.drawRect(skia.Rect(x, y, x + 70, y + 12),
                        paint(TEAL if on else STEEL, head * (1.0 if on else 0.35)))
+    return rule_y
 
 
 def card(c, t, dur, cid, times, overlay=False):
@@ -197,7 +215,10 @@ def card(c, t, dur, cid, times, overlay=False):
     else:
         brand_background(c, t + 20)
     a = 1 - ease_in_out_cubic(prog(t, dur - 0.45, dur))
-    header(c, t, cd, a)
+    rule_y = header(c, t, cd, a, overlay)
+    if overlay:
+        _story(c, t, dur, cd, times, a, overlay=True, top=rule_y + 150)
+        return
     {"story": _story, "columns": _columns, "grid": _grid, "refs": _refs}[cd["layout"]](
         c, t, dur, cd, times, a, overlay)
 
@@ -207,13 +228,17 @@ def card_overlay(c, t, dur, cid, times):
 
 
 def _scrim(c):
-    """Navy wash on the left so text reads over any shot."""
+    """Solid presentation panel on the left; the 3D shot plays on the right."""
     sh = skia.GradientShader.MakeLinear(
-        [skia.Point(0, 0), skia.Point(2500, 0)],
-        [with_alpha(NAVY_DEEP, 0.9), with_alpha(NAVY_DEEP, 0.78), with_alpha(NAVY_DEEP, 0.0)],
-        [0.0, 0.55, 1.0])
-    c.drawRect(skia.Rect(0, 0, 2500, H), skia.Paint(Shader=sh))
-    c.drawRect(skia.Rect(0, 0, W, 10), paint(TEAL, 0.9))
+        [skia.Point(0, 0), skia.Point(0, H)], [0xFF0E1640, NAVY_DEEP], [0.0, 1.0])
+    p = skia.Paint(Shader=sh)
+    c.drawRect(skia.Rect(0, 0, PANEL_W, H), p)
+    sp = paint(0xFF000000, 0.45)
+    sp.setMaskFilter(skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, 30))
+    c.drawRect(skia.Rect(PANEL_W - 10, 0, PANEL_W + 20, H), sp)
+    c.drawRect(skia.Rect(PANEL_W - 8, 0, PANEL_W, H), paint(TEAL, 0.95))
+    c.drawRect(skia.Rect(PANEL_W - 8, 0, PANEL_W, 260), paint(RED, 1.0))
+    c.drawRect(skia.Rect(0, 0, PANEL_W, 10), paint(TEAL, 0.9))
     c.drawRect(skia.Rect(0, 0, 360, 10), paint(RED, 1.0))
 
 
@@ -226,8 +251,11 @@ def _active(t, times):
 
 
 # ------------------------------------------------------------------ story --
-def _story(c, t, dur, cd, times, a, overlay=False):
+def _story(c, t, dur, cd, times, a, overlay=False, top=None):
     x0, width, y0, max_h = 200, 1640, 720, 1230
+    if overlay:
+        width, y0 = PANEL_W - 400, top
+        max_h = 1880 - y0
     size = 84
     while True:
         f = font("med", size)
@@ -238,7 +266,7 @@ def _story(c, t, dur, cd, times, a, overlay=False):
             break
         size -= 2
     act = _active(t, times)
-    y = y0 + (max_h - h) * 0.35
+    y = y0 if overlay else y0 + (max_h - h) * 0.35
     for k, lines in enumerate(paras):
         ak = _ease_in(t, times[k], 0.7)
         if ak > 0:

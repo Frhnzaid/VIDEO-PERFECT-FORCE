@@ -301,9 +301,11 @@ def portal_rack(name, org, length, width, height, spacing, m_steel, levels=(1.0,
 # ---------------------------------------------------------------- world ----
 SUN = dict(golden=(9.0, 3.2, 0.28), day=(28.0, 3.2, 0.22), dusk=(0.6, 0.35, 0.10),
            sunset=(2.5, 2.2, 0.22))
+SUN["studio"] = (40.0, 0.6, 0.0)
 SHOT_SUN = dict(offshore="golden", power="golden", chem="golden", closeup="golden",
-                valve="dusk", live="day", pressure="day", clamp="day", sunset="sunset",
-                replace="day")
+                valve="dusk", live="day", pressure="day", clamp="studio", sunset="sunset",
+                replace="studio")
+STUDIO = {"clamp", "replace"}   # the PFC on a clean, light backdrop
 
 
 def world_and_sun():
@@ -320,7 +322,13 @@ def world_and_sun():
     sky.sun_disc = False
     sky.sun_rotation = math.radians(200)
     nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
-    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+    studio = nt.nodes.new("ShaderNodeBackground")
+    studio.inputs["Color"].default_value = (*srgb("#D3D7DD"), 1)
+    studio.inputs["Strength"].default_value = 0.9
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    nt.links.new(bg.outputs["Background"], mix.inputs[1])
+    nt.links.new(studio.outputs["Background"], mix.inputs[2])
+    nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
     bpy.ops.object.light_add(type="SUN", location=(0, 0, 50))
     sun = bpy.context.object
     sun.name = "sun"
@@ -333,6 +341,8 @@ def world_and_sun():
         sky.keyframe_insert("sun_elevation", frame=fr)
         bg.inputs["Strength"].default_value = sky_str
         bg.inputs["Strength"].keyframe_insert("default_value", frame=fr)
+        mix.inputs[0].default_value = 1.0 if shot in STUDIO else 0.0
+        mix.inputs[0].keyframe_insert("default_value", frame=fr)
         e = math.radians(max(elev, 2.0))
         sun.rotation_euler = (math.pi / 2 - e, 0, math.radians(200) + math.pi / 2)
         sun.keyframe_insert("rotation_euler", frame=fr)
@@ -378,6 +388,23 @@ def build_offshore(M):
     cyl_z("vessel", 3.2, 0, 11, o.x + 30, o.y + 20, M["tank_white"])
     cyl_z("stack", 1.0, 0, 34, o.x + 46, o.y + 24, M["steel_grey"])
     box_obj("module", (16, 12, 10), (o.x + 10, o.y + 26, 5), M["steel_grey"])
+    # derrick: four leaning legs with girts
+    dx, dy, h = o.x + 40, o.y + 8, 34
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            p0 = Vector((dx + sx * 4, dy + sy * 4, 0))
+            p1 = Vector((dx + sx * 1.2, dy + sy * 1.2, h))
+            pipe(f"dleg{sx}{sy}", p0, p1, 0.22, M["steel_white"], seg=8)
+    for z in range(4, h, 5):
+        k = z / h
+        e = 4 - 2.8 * k
+        for (ax, ay, bx, by) in ((-e, -e, e, -e), (e, -e, e, e), (e, e, -e, e), (-e, e, -e, -e)):
+            pipe(f"dg{z}{ax}{ay}", (dx + ax, dy + ay, z), (dx + bx, dy + by, z), 0.1, M["steel_white"], seg=6)
+    # pedestal crane and a flare boom
+    cyl_z("crane_ped", 1.2, 0, 8, o.x + 2, o.y + 30, M["steel_yellow"])
+    pipe("crane_boom", (o.x + 2, o.y + 30, 8), (o.x - 14, o.y + 18, 24), 0.35, M["steel_yellow"], seg=8)
+    pipe("flare", (o.x + 60, o.y + 20, 2), (o.x + 85, o.y + 34, 22), 0.4, M["steel_grey"], seg=8)
+    cyl_z("flare_tip", 0.7, 22, 23.2, o.x + 85, o.y + 34, M["steel_grey"], seg=16)
 
 
 def build_power(M):
@@ -504,6 +531,7 @@ def build_joint_set(M):
     P.build_joint(Mj)
     studs = P.build_flange_studs(Mj)
     jaws, lugs, pfc_studs = P.build_pfc(Mj)
+    n0 = set(bpy.data.objects.keys())
     ground("j_ground", (0, 0, -6.0), 900, M["concrete"])
     for x in (-7.5, 7.5):
         box_obj(f"jsup{x}", (0.9, 1.6, 5.6), (x, 0, -3.2), M["steel_yellow"])
@@ -518,6 +546,36 @@ def build_joint_set(M):
         else:
             cyl_z(f"bgc{k}", rnd.uniform(2, 4), -6, rnd.uniform(40, 80), x, y, M["steel_grey"])
     portal_rack("jrack", Vector((-60, 45, -6)), 120, 8, 10, 8, M["steel_grey"], levels=(0.6, 1.0))
+    plant = [bpy.data.objects[k] for k in set(bpy.data.objects.keys()) - n0]
+    # studio: light floor and soft boxes, only in the product shots
+    floor = ground("studio_floor", (0, 0, -6.0), 900, M["studio_floor"])
+    lights = []
+    for name, loc, energy, size in (("st_key", (-6, -9, 9), 2600, 8), ("st_fill", (-11, 4, 3), 900, 8),
+                                    ("st_rim", (6, 8, 7), 1800, 6), ("st_top", (0, 0, 12), 900, 10)):
+        bpy.ops.object.light_add(type="AREA", location=loc)
+        l = bpy.context.object
+        l.name = name
+        l.data.size = size
+        l.data.color = (1.0, 0.98, 0.95)
+        tr = l.constraints.new("TRACK_TO")
+        bpy.ops.object.empty_add(location=(0, 0, 0))
+        tr.target = bpy.context.object
+        tr.track_axis = "TRACK_NEGATIVE_Z"
+        tr.up_axis = "UP_Y"
+        lights.append((l, energy))
+    for shot in SHOT_ORDER:
+        fr = F(S[shot][0])
+        st = shot in STUDIO
+        for o in plant:
+            o.hide_render = st
+            o.keyframe_insert("hide_render", frame=fr)
+        floor.hide_render = not st
+        floor.keyframe_insert("hide_render", frame=fr)
+        for l, e in lights:
+            l.data.energy = e if st else 0.0
+            l.data.keyframe_insert("energy", frame=fr)
+    for o in plant + [floor] + [l.data for l, _ in lights]:
+        _constant(o)
     return Mj, studs, jaws, lugs, pfc_studs
 
 
@@ -570,7 +628,7 @@ def animate_joint(Mj, studs, jaws, lugs, pfc_studs):
 
 
 # --------------------------------------------------------------- cameras ---
-def shot_camera(name, keys, lens=35, fstop=None, focus=None, shift_x=-0.16):
+def shot_camera(name, keys, lens=35, fstop=None, focus=None, shift_x=-0.235):
     """keys: [(t, cam_loc, target_loc)]"""
     bpy.ops.object.empty_add(location=keys[0][2])
     tgt = bpy.context.object
@@ -600,8 +658,8 @@ def build_cameras():
     a, b = S["offshore"]
     o = ORG["offshore"]
     cams["offshore"] = shot_camera("cam_off", [
-        (a, o + Vector((-9, -9.5, 2.2)), o + Vector((6, 0, 4.2))),
-        (b, o + Vector((-3, -9.0, 2.6)), o + Vector((12, 0, 4.4)))], lens=28)
+        (a, o + Vector((-42, -50, -3.0)), o + Vector((16, 6, 3.0))),
+        (b, o + Vector((-35, -47, -2.0)), o + Vector((18, 6, 3.5)))], lens=30)
     a, b = S["power"]
     o = ORG["power"]
     cams["power"] = shot_camera("cam_pw", [
@@ -631,8 +689,8 @@ def build_cameras():
         (b, (-1.6, -5.8, 2.0), (-3.2, 0, 0.2))], lens=40, fstop=0.9)
     a, b = S["clamp"]
     cams["clamp"] = shot_camera("cam_cl", [
-        (a, (-10.0, -8.5, 4.8), (0.3, 0, 0)),
-        (b, (-8.0, -9.0, 3.2), (0.3, 0, 0))], lens=38, fstop=1.0)
+        (a, (-12.5, -11.0, 6.0), (0.3, 0, 0)),
+        (b, (-10.0, -11.5, 4.0), (0.3, 0, 0))], lens=38, fstop=2.0)
     a, b = S["sunset"]
     o = ORG["chem"]
     cams["sunset"] = shot_camera("cam_ss", [
@@ -640,9 +698,9 @@ def build_cameras():
         (b, o + Vector((-18, -24, 7.5)), o + Vector((14, 22, 12)))], lens=24)
     a, b = S["replace"]
     cams["replace"] = shot_camera("cam_rp", [
-        (a, (-9.0, -7.5, 4.0), (0.3, 0, 0)),
-        (a + 6.0, (-9.2, -5.6, 2.8), (0.3, 0, 0)),
-        (b, (-7.2, -9.5, 2.4), (0.4, 0, 0))], lens=38, fstop=1.0)
+        (a, (-13.5, -11.0, 6.0), (0.3, 0, 0)),
+        (a + 6.0, (-13.5, -8.5, 4.2), (0.3, 0, 0)),
+        (b, (-11.0, -14.0, 3.6), (0.4, 0, 0))], lens=38, fstop=2.0)
     return cams
 
 
@@ -659,8 +717,10 @@ def build():
         pipe_insul=rust_mat("pipe_insul", "#B9BCBF", rust=0.12, scale=0.5, paint_rough=0.3,
                             paint_metal=0.8),
         steel_grey=rust_mat("steel_grey", "#6E747A", rust=0.25, scale=0.5, streak=True),
+        steel_white=rust_mat("steel_white", "#E2E2DE", rust=0.2, scale=0.6, streak=True),
         steel_yellow=rust_mat("steel_yellow", "#C49A22", rust=0.35, scale=0.6, streak=True),
         tank_white=rust_mat("tank_white", "#D6D5CF", rust=0.18, scale=0.25, streak=True),
+        studio_floor=mat("studio_floor", srgb("#D9DCE1"), rough=0.55),
         tower=rust_mat("tower", "#9C9A94", rust=0.08, scale=0.05, paint_rough=0.9),
         cladding=rust_mat("cladding", "#7D8A93", rust=0.1, scale=0.1),
         valve_body=rust_mat("valve_body", "#2F4F3A", rust=0.5, scale=2.0),
