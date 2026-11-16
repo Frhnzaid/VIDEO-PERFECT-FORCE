@@ -1,0 +1,4 @@
+output/*.mp4
+work/
+__pycache__/
+*.part.*
