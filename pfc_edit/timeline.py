@@ -105,6 +105,14 @@ TIMELINES["preview_v2"] = {
     "audio_start": 0.0,
 }
 
+# whole background section on its own (draft check)
+TIMELINES["draft_bg"] = {
+    "sequence": [{"type": "frames_bg", "ids": ["bg1", "bg2", "bg3", "bg4"]}],
+    "wipe_after": [],
+    "overlays": [],
+    "audio_start": 0.0,
+}
+
 TIMELINES["full2d"] = dict(TIMELINES["full"])
 TIMELINES["full2d"]["sequence"] = [
     {"type": "how_it_works", "dur": SEQ_TOTAL} if it["type"] == "frames3d" else it
