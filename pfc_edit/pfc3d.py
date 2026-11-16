@@ -567,6 +567,17 @@ def build_tools(M):
     T_["caliper"] = root
     T_["caliper_jaws"] = (jaw1, jaw2)
 
+    # glowing rings that fill the measured gaps (flange faces; male / female PFC)
+    mgap = mat("gap_glow", srgb("#0E4F5A"), rough=0.4, emit=srgb("#6FD3C6"), emit_strength=0.0)
+    gfl = cyl_x("gap_flange", FL_R - 0.004, -GAP / 2 + 0.004, GAP / 2 - 0.004, verts=128)
+    boolean(gfl, cyl_x("gfi", FL_R * 0.8, -1, 1, verts=128))
+    gpf = cyl_x("gap_pfc", PFC_RO - 0.01, -RING_GAP + 0.006, RING_GAP - 0.006, verts=160)
+    boolean(gpf, cyl_x("gpi", REBATE_R + 0.03, -1, 1, verts=160))
+    for g in (gfl, gpf):
+        set_mat(g, mgap)
+        key_hide(g, 1, True)
+    T_["gap_marks"] = (gfl, gpf, mgap)
+
     # brush for Molykote
     root = _empty("tool_brush")
     bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.07, depth=1.2, location=(0, 0, 0.95))
@@ -649,6 +660,40 @@ def key_spin(o, frame, deg):
     o.keyframe_insert("rotation_euler", frame=frame)
 
 
+def _gap_measure(cal, jaws, mark, mgap, t0, span, angles, r_tip, half_gap, blade, nums):
+    """Caliper jaws into a gap at each angle: in, open to touch both faces, read
+    (gap glows), close, out. half_gap = half the gap width, blade = jaw thickness."""
+    f = sec
+    j1, j2 = jaws
+    for jw in jaws:
+        key_scale(jw, f(t0 - 0.2), (blade / 0.07, 1, 1))
+    closed, opened = blade / 2 + 0.002, half_gap - blade / 2 - 0.001
+    key_hide(mark, f(t0 - 0.2), False)
+    sp = span / len(angles)
+    for k, ang in enumerate(angles):
+        t = t0 + k * sp
+        for jw, sg in ((j1, -1), (j2, 1)):
+            jw.location.x = sg * closed
+            jw.keyframe_insert("location", frame=f(t + 0.3))
+            jw.location.x = sg * opened
+            jw.keyframe_insert("location", frame=f(t + 0.7))
+            jw.keyframe_insert("location", frame=f(t + sp * 0.72))
+            jw.location.x = sg * closed
+            jw.keyframe_insert("location", frame=f(t + sp * 0.8))
+        tool_place(cal, f(t), 0.0, ang, r_tip + 0.7)
+        tool_place(cal, f(t + 0.3), 0.0, ang, r_tip)
+        tool_place(cal, f(t + sp * 0.8), 0.0, ang, r_tip)
+        tool_place(cal, f(t + sp * 0.97), 0.0, ang, r_tip + 0.7)
+        key_emit(mgap, f(t + 0.6), 0.0)
+        key_emit(mgap, f(t + 0.8), 4.0)
+        key_emit(mgap, f(t + sp * 0.7), 4.0)
+        key_emit(mgap, f(t + sp * 0.85), 0.0)
+        if nums is not None:
+            key_scale(nums[ang], f(t + sp * 0.55), 0.001)
+            key_scale(nums[ang], f(t + sp * 0.75), 1.0)
+    key_hide(mark, f(t0 + span + 0.1), True)
+
+
 def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     f = sec
     jaw_by = {j.name: j for j in jaws}
@@ -691,15 +736,14 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
     key_hide(brush, f(a1e - 0.2), True)
 
     # ---- A2 caliper at the four sides, numbers marked ---------------------
+    # the caliper's jaws go into the gap between the two flange faces and open
+    # until they touch both faces; the gap glows while it is read
     a2 = S["A2"][0]
+    j1, j2 = tools["caliper_jaws"]
+    gfl, gpfc, mgap = tools["gap_marks"]
     key_hide(cal, f(a2 + 0.2), False)
-    for k, ang in enumerate(SIDE_ORDER):
-        sp = (DUR["A2"] - 0.8) / 4
-        t = a2 + 0.3 + k * sp
-        tool_place(cal, f(t), 0.0, ang, FL_R + 0.02)
-        tool_place(cal, f(t + sp * 0.75), 0.0, ang, FL_R + 0.02)
-        key_scale(nums[ang], f(t + 0.5), 0.001)
-        key_scale(nums[ang], f(t + 0.8), 1.0)
+    _gap_measure(cal, (j1, j2), gfl, mgap, a2 + 0.3, DUR["A2"] - 0.8, SIDE_ORDER,
+                 FL_R - 0.22, GAP / 2, 0.012, nums)
     key_hide(cal, f(S["A2"][1] - 0.3), True)
 
     # ---- A3 torque existing stud bolts + sound check ----------------------
@@ -763,18 +807,11 @@ def animate(studs, jaws, lugs, pfc_studs, M, tools, nums, tray, rack):
         key_spin(nuts[0], f(t0 + 0.85), 0)
         key_spin(nuts[0], f(t0 + 1.25), 540)
 
-    # ---- B6 caliper check across the PFC ----------------------------------
+    # ---- B6 caliper in the gap between the male and female PFC rings ------
     b6 = S["B6"][0]
-    j1, j2 = tools["caliper_jaws"]
     key_hide(cal, f(b6 + 0.1), False)
-    for jw, sgn in ((j1, -1), (j2, 1)):
-        jw.location.x = sgn * 1.0
-        jw.keyframe_insert("location", frame=f(b6))
-    for k, ang in enumerate(SIDE_ORDER[:2]):
-        sp = (DUR["B6"] - 0.6) / 2
-        t = b6 + 0.2 + k * sp
-        tool_place(cal, f(t), 0.0, ang, PFC_RO + 0.02)
-        tool_place(cal, f(t + sp * 0.8), 0.0, ang, PFC_RO + 0.02)
+    _gap_measure(cal, (j1, j2), gpfc, mgap, b6 + 0.2, DUR["B6"] - 0.6, SIDE_ORDER[:2],
+                 PFC_RO - 0.26, RING_GAP, 0.03, None)
     key_hide(cal, f(S["B6"][1] - 0.2), True)
 
     # ---- B7 grub screws: No. 1 first, then criss-cross --------------------
@@ -910,8 +947,8 @@ def camera_rig():
         (st("A1", 0.4), (-1.5, -9.8, 1.6), (0, -4.6, -2.4)),
         (en("A1", 0.3), (2.0, -10.0, 1.2), (0, -4.6, -2.4)),
         # A2 caliper around the flange
-        (st("A2", 0.3), (-9.6, -8.4, 4.2), (0, 0, -0.2)),
-        (en("A2", 0.4), (-9.2, -9.2, 2.4), (0, 0, -0.2)),
+        (st("A2", 0.3), (-3.6, -6.4, 4.6), (0, -0.3, 0.5)),
+        (en("A2", 0.4), (-2.8, -6.8, 2.2), (0, -0.4, 0.2)),
         # A3 torque existing bolts
         (st("A3", 0.4), (-9.0, -6.2, 3.6), (-0.4, 0, 0)),
         (en("A3", 0.4), (-9.0, -7.0, 2.0), (-0.4, 0, 0)),
@@ -922,8 +959,8 @@ def camera_rig():
         (st("B5", 0.3), (-6.5, -11.0, 1.0), (0, -1.6, -0.8)),
         (en("B5", 0.3), (-8.2, -7.4, 2.8), (0, 0, 0)),
         # B6 caliper check
-        (st("B6", 0.3), (-6.5, -5.8, 5.6), (0, 0, 2.3)),
-        (en("B6", 0.3), (-6.2, -6.4, 3.0), (0, -1.0, 0.0)),
+        (st("B6", 0.3), (-3.4, -7.2, 6.2), (0, -0.2, 2.2)),
+        (en("B6", 0.3), (-3.0, -7.6, -0.6), (0, -0.4, -1.8)),
         # B7 grub screws
         (st("B7", 0.3), (-7.4, -3.8, 3.0), (-0.6, 0, 0.6)),
         (en("B7", 0.3), (-7.4, -4.6, 1.6), (-0.6, 0, 0.0)),
