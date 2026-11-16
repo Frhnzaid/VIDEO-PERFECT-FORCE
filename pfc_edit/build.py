@@ -229,6 +229,8 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
                     ov["at"] = start + ov["src_at"] - a
                     break
             else:
+                if tl.get("partial_src"):
+                    continue  # this edit leaves that footage out
                 raise ValueError(f"src_at {ov['src_at']} not in any source segment")
         overlays.append(ov)
     # branded wipe centred on the joins that ask for it
@@ -289,6 +291,8 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
                 for a_, b_, st_ in src_map:
                     if a_ <= ln["src_at"] < b_:
                         at = st_ + ln["src_at"] - a_
+                if at is None and tl.get("partial_src"):
+                    continue
                 if at is None:
                     raise ValueError(f"narration {ln['id']}: src_at outside the edit")
             placed.append((at, os.path.join(vo_dir, ln["id"] + ".wav")))

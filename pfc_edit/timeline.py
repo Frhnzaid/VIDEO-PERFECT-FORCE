@@ -80,20 +80,33 @@ TIMELINES = {
 # v2: story first, then method, footage, safety, result and references
 TIMELINES["full_v2"] = {
     "sequence": [
-        {"type": "intro", "dur": 6.0},                        # 0
-        {"type": "frames_bg", "ids": ["bg1", "bg2", "bg3", "bg4"]},  # 1  background (3D)
-        {"type": "card", "id": "problem"},                    # 2
-        {"type": "card", "id": "solution"},                   # 3
-        {"type": "frames3d", "dur": PFC3D_TOTAL},             # 4  methodology
-        {"type": "src", "in": 12.25, "out": 200.17},          # 5  installation
-        {"type": "card", "id": "safety"},                     # 6
-        {"type": "src", "in": 205.17, "out": 355.04},         # 7  hydrotest, result
-        {"type": "card", "id": "references"},                 # 8
-        {"type": "outro", "dur": 8.0},                        # 9
+        {"type": "intro", "dur": 6.0},                                # 0
+        {"type": "frames_bg", "ids": ["bg1", "bg2", "bg3", "bg4"]},   # 1  background (3D)
+        {"type": "card", "id": "problem"},                            # 2  problem statement
+        {"type": "card", "id": "solution"},                           # 3
+        {"type": "frames3d", "dur": PFC3D_TOTAL},                     # 4  methodology (3D)
+        {"type": "card", "id": "safety"},                             # 5
+        {"type": "src", "in": 205.17, "out": 355.04},                 # 6  result: hydrotest
+        {"type": "card", "id": "references"},                         # 7
+        {"type": "outro", "dur": 8.0},                                # 8
     ],
-    # branded wipe between sections; cards inside a section cut on a fade
-    "wipe_after": [0, 1, 3, 4, 5, 6, 7, 8],
-    "overlays": TIMELINES["full"]["overlays"],
+    # branded wipe between sections; problem -> solution cuts on a fade
+    "wipe_after": [0, 1, 3, 4, 5, 6, 7],
+    # installation footage is left out (the 3D covers it); hydrotest only
+    "partial_src": True,
+    "overlays": [
+        {"type": "lower_third", "src_at": 205.85, "dur": 5.5,
+         "args": {"kicker": "RESULT", "title": "HYDROTEST PRESSURE TESTING",
+                  "sub": "Test pressure: 5,600 psi"}},
+        {"type": "callout", "src_at": 212.0, "dur": 3.6,
+         "args": {"cx": 1940, "cy": 900, "r": 310, "label": "PRESSURE GAUGE"}},
+        {"type": "lower_third", "src_at": 244.25, "dur": 5.0,
+         "args": {"kicker": "RESULT \u00b7 HYDROTEST", "title": "PRESSURE CHART RECORDER"}},
+        {"type": "lower_third", "src_at": 326.35, "dur": 5.0,
+         "args": {"kicker": "RESULT \u00b7 HYDROTEST", "title": "COMPLETE TEST ASSEMBLY"}},
+        {"type": "lower_third", "src_at": 350.45, "dur": 4.1,
+         "args": {"kicker": "RESULT", "title": "RECORDED PRESSURE CHART"}},
+    ],
     "audio_start": 0.0,
 }
 
