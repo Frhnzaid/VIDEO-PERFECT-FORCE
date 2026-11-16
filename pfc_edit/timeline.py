@@ -77,6 +77,37 @@ TIMELINES = {
     "full2d": None,
 }
 
+# v2: story first, then method, footage, safety, result and references
+TIMELINES["full_v2"] = {
+    "sequence": [
+        {"type": "intro", "dur": 6.0},                        # 0
+        {"type": "card", "id": "bg1"},                        # 1
+        {"type": "card", "id": "bg2"},                        # 2
+        {"type": "card", "id": "bg3"},                        # 3
+        {"type": "card", "id": "bg4"},                        # 4
+        {"type": "card", "id": "problem"},                    # 5
+        {"type": "card", "id": "solution"},                   # 6
+        {"type": "frames3d", "dur": PFC3D_TOTAL},             # 7  methodology
+        {"type": "src", "in": 12.25, "out": 200.17},          # 8  installation
+        {"type": "card", "id": "safety"},                     # 9
+        {"type": "src", "in": 205.17, "out": 355.04},         # 10 hydrotest, result
+        {"type": "card", "id": "references"},                 # 11
+        {"type": "outro", "dur": 8.0},                        # 12
+    ],
+    # branded wipe between sections; cards inside a section cut on a fade
+    "wipe_after": [0, 4, 6, 7, 8, 9, 10, 11],
+    "overlays": TIMELINES["full"]["overlays"],
+    "audio_start": 0.0,
+}
+
+# 10-15 s look at the new cards
+TIMELINES["preview_v2"] = {
+    "sequence": [{"type": "card", "id": "bg1"}],
+    "wipe_after": [],
+    "overlays": [],
+    "audio_start": 0.0,
+}
+
 TIMELINES["full2d"] = dict(TIMELINES["full"])
 TIMELINES["full2d"]["sequence"] = [
     {"type": "how_it_works", "dur": SEQ_TOTAL} if it["type"] == "frames3d" else it

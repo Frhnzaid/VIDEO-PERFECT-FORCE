@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cards  # noqa: E402
 import gfx  # noqa: E402
 import narration  # noqa: E402
 from pfc_steps import S as STEP_T  # noqa: E402
@@ -41,6 +42,7 @@ GFX_FUNCS = {
     "callout": (gfx.callout, False),
     "how_it_works": (gfx.how_it_works, True),
     "pfc3d_overlay": (gfx.pfc3d_overlay, False),
+    "card": (cards.card, True),
 }
 
 
@@ -81,25 +83,45 @@ def probe_duration(path, stream="a"):
     return float(r.stdout.strip())
 
 
-def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0):
+def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0,
+                loop_at=40.0):
     """Original soundtrack for `total` seconds.
 
-    When the new edit is longer than the source track, a section of the music is
-    repeated with a crossfade at `splice_at`, so the song still ends on its own
-    outro instead of cutting to silence.
+    When the new edit is longer than the source track, the section
+    [loop_at, splice_at] is repeated with crossfades, so the song still ends on
+    its own outro instead of cutting to silence.
     """
     tail = (f"afade=t=in:st=0:d=0.6,"
             f"afade=t=out:st={max(total - 2.5, 0):.3f}:d=2.5[{out_label}]")
     avail = src_dur - a0
     if total <= avail:
         return (f"[{inp}]atrim=start={a0}:duration={total:.3f},asetpts=PTS-STARTPTS," + tail)
-    # len = (splice_at - a0) + (src_dur - y) - xfade == total
-    y = splice_at - (total - avail) - xfade
-    return (f"[{inp}]asplit=2[ma][mb];"
-            f"[ma]atrim=start={a0}:end={splice_at:.3f},asetpts=PTS-STARTPTS[m1];"
-            f"[mb]atrim=start={y:.3f},asetpts=PTS-STARTPTS[m2];"
-            f"[m1][m2]acrossfade=d={xfade}:c1=tri:c2=tri,"
-            f"atrim=duration={total:.3f}," + tail)
+    head, loop = splice_at - a0, splice_at - loop_at
+    n = 0
+    while head + n * loop + (src_dur - loop_at) - (n + 1) * xfade < total:
+        n += 1
+    y = head + n * loop + src_dur - (n + 1) * xfade - total   # start of the final piece
+    pieces = [(a0, splice_at)] + [(loop_at, splice_at)] * n + [(y, src_dur)]
+    # each piece fades in/out over `xfade` and is laid at its offset, then mixed
+    # (a chained acrossfade drops the middle pieces on long inputs)
+    k = len(pieces)
+    out = [f"[{inp}]asplit={k}" + "".join(f"[ms{i}]" for i in range(k))]
+    at, labels = 0.0, []
+    for i, (a, b) in enumerate(pieces):
+        d = b - a
+        fades = []
+        if i > 0:
+            fades.append(f"afade=t=in:st=0:d={xfade}:curve=tri")
+        if i < k - 1:
+            fades.append(f"afade=t=out:st={d - xfade:.3f}:d={xfade}:curve=tri")
+        ms = int(round(at * 1000))
+        out.append(f"[ms{i}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,"
+                   + ",".join(fades) + f",adelay={ms}|{ms},apad[mp{i}]")
+        labels.append(f"[mp{i}]")
+        at += d - xfade
+    out.append("".join(labels) + f"amix=inputs={k}:normalize=0:duration=longest,"
+               f"atrim=duration={total:.3f}," + tail)
+    return ";".join(out)
 
 
 def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=None):
@@ -118,11 +140,23 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
         n_in[0] += 1
         return n_in[0] - 1
 
+    # cards take their length from the voice-over
+    vo_dir = os.path.join(work, "vo")
+    vo_durs = narration.synth(voice, vo_dir) if voice else None
+    seq = []
+    for item in tl["sequence"]:
+        item = dict(item)
+        if item["type"] == "card":
+            times, dur = cards.timing(item["id"], vo_durs)
+            item.update(dur=dur, args={"cid": item["id"], "times": times})
+        seq.append(item)
+    card_times = {it["id"]: it["args"]["times"] for it in seq if it["type"] == "card"}
+
     t = 0.0
     joins = []
     extra_overlays = []
     # ---- picture: main sequence ------------------------------------------
-    for i, item in enumerate(tl["sequence"]):
+    for i, item in enumerate(seq):
         if item["type"] == "src":
             idx = add_input("-ss", f"{item['in']:.3f}", "-to", f"{item['out']:.3f}", "-i", src)
             filters.append(f"[{idx}:v]{GRADE},setpts=PTS-STARTPTS[v{i}]")
@@ -140,7 +174,12 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
             extra_overlays.append({"type": "pfc3d_overlay", "at": t, "dur": dur})
         else:
             dur = item["dur"]
-            path = os.path.join(work, f"{item['type']}_{name}_{dur:.2f}.mp4")
+            tag = item.get("id", name)
+            if item["type"] == "card":
+                import hashlib
+                h = hashlib.md5((repr(item["args"]) + repr(cards.CARDS[tag])).encode()).hexdigest()[:8]
+                tag = f"{tag}_{h}"
+            path = os.path.join(work, f"{item['type']}_{tag}_{dur:.2f}.mp4")
             render_gfx(item["type"], dur, path, logo, **item.get("args", {}))
             idx = add_input("-i", path)
             filters.append(f"[{idx}:v]setpts=PTS-STARTPTS,format=yuv420p[v{i}]")
@@ -154,7 +193,7 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
     cur = "base"
     # overlays may be placed by source time ("src_at") instead of timeline time
     src_map, acc = [], 0.0
-    for item in tl["sequence"]:
+    for item in seq:
         d = item["out"] - item["in"] if item["type"] == "src" else item["dur"]
         if item["type"] == "src":
             src_map.append((item["in"], item["out"], acc))
@@ -197,23 +236,31 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
         filters.append("[music0]volume=-7dB[music1]")
         starts = {}
         acc = 0.0
-        for item in tl["sequence"]:
+        for item in seq:
             d = item["out"] - item["in"] if item["type"] == "src" else item["dur"]
-            starts.setdefault(item["type"], acc)
+            starts.setdefault(item.get("id", item["type"]), acc)
             acc += d
-        vo_dir = os.path.join(work, "vo")
-        narration.synth(voice, vo_dir)
         placed = []
         for ln in narration.LINES:
-            if "at" in ln:
+            if "card" in ln:
+                if ln["card"] not in starts:
+                    continue  # card not in this timeline
+                at = starts[ln["card"]] + card_times[ln["card"]][ln["beat"]]
+            elif "at" in ln:
+                if "intro" not in starts:
+                    continue  # absolute lines belong to the full edit
                 at = ln["at"]
             elif "outro" in ln:
+                if "outro" not in starts:
+                    continue
                 at = starts["outro"] + ln["outro"]
             elif "step" in ln:
                 if "frames3d" not in starts:
-                    continue  # 2D variant has no 3D steps
+                    continue  # no 3D steps in this timeline
                 at = starts["frames3d"] + STEP_T[ln["step"]][0] + ln["off"]
             else:
+                if not src_map:
+                    continue
                 at = None
                 for a_, b_, st_ in src_map:
                     if a_ <= ln["src_at"] < b_:

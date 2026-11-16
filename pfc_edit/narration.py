@@ -88,6 +88,12 @@ LINES = [
 ]
 
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cards import vo_lines  # noqa: E402
+
+LINES += vo_lines()   # v2 cards: background, problem / solution, safety, references
+
+
 def wav_duration(path):
     with wave.open(path) as w:
         return w.getnframes() / float(w.getframerate())
