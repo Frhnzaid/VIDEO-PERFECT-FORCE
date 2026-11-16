@@ -43,6 +43,7 @@ GFX_FUNCS = {
     "how_it_works": (gfx.how_it_works, True),
     "pfc3d_overlay": (gfx.pfc3d_overlay, False),
     "card": (cards.card, True),
+    "card_overlay": (cards.card_overlay, False),
 }
 
 
@@ -124,7 +125,8 @@ def audio_chain(inp, a0, total, src_dur, out_label, splice_at=200.0, xfade=4.0,
     return ";".join(out)
 
 
-def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=None):
+def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=None,
+          frames_bg=None):
     tl = TIMELINES[name]
     os.makedirs(work, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -149,8 +151,15 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
         if item["type"] == "card":
             times, dur = cards.timing(item["id"], vo_durs)
             item.update(dur=dur, args={"cid": item["id"], "times": times})
+        elif item["type"] == "frames_bg":
+            # 3D background shots under a run of story cards (bg3d.py)
+            secs, dur = cards.section_timing(item["ids"], vo_durs)
+            item.update(dur=dur, secs=secs)
         seq.append(item)
     card_times = {it["id"]: it["args"]["times"] for it in seq if it["type"] == "card"}
+    for it in seq:
+        for s_ in it.get("secs", []):
+            card_times[s_["id"]] = s_["times"]
 
     t = 0.0
     joins = []
@@ -172,6 +181,19 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
                            f"setsar=1,fps={FPS},format=yuv420p,trim=duration={dur:.3f},"
                            f"setpts=PTS-STARTPTS[v{i}]")
             extra_overlays.append({"type": "pfc3d_overlay", "at": t, "dur": dur})
+        elif item["type"] == "frames_bg":
+            if not frames_bg or not os.path.isdir(frames_bg):
+                raise SystemExit("this timeline needs --frames-bg DIR (output of bg3d.py)")
+            dur = item["dur"]
+            idx = add_input("-framerate", str(FPS), "-start_number", "1",
+                            "-i", os.path.join(frames_bg, "f_%05d.png"))
+            filters.append(f"[{idx}:v]scale={W}:{H}:flags=lanczos,unsharp=5:5:0.4,"
+                           f"setsar=1,fps={FPS},format=yuv420p,trim=duration={dur:.3f},"
+                           f"setpts=PTS-STARTPTS[v{i}]")
+            for s_ in item["secs"]:
+                extra_overlays.append({"type": "card_overlay", "at": t + s_["start"],
+                                       "dur": s_["dur"],
+                                       "args": {"cid": s_["id"], "times": s_["times"]}})
         else:
             dur = item["dur"]
             tag = item.get("id", name)
@@ -239,6 +261,8 @@ def build(name, src, out, work, logo_path, crf, preset, frames3d=None, voice=Non
         for item in seq:
             d = item["out"] - item["in"] if item["type"] == "src" else item["dur"]
             starts.setdefault(item.get("id", item["type"]), acc)
+            for s_ in item.get("secs", []):
+                starts[s_["id"]] = acc + s_["start"]
             acc += d
         placed = []
         for ln in narration.LINES:
@@ -307,9 +331,11 @@ def main():
     ap.add_argument("--crf", type=int, default=17)
     ap.add_argument("--preset", default="medium")
     ap.add_argument("--frames3d", default=None, help="PNG frames from pfc3d.py")
+    ap.add_argument("--frames-bg", default=None, help="PNG frames from bg3d.py")
     ap.add_argument("--voice", default=None, help="Piper voice model (.onnx) for the voice-over")
     a = ap.parse_args()
-    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset, a.frames3d, a.voice)
+    build(a.timeline, a.src, a.out, a.work, a.logo, a.crf, a.preset, a.frames3d, a.voice,
+          a.frames_bg)
 
 
 if __name__ == "__main__":

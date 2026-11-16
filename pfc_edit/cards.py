@@ -9,7 +9,7 @@ import math
 
 import skia
 
-from gfx import (BOLT_NEW, H, NAVY, NAVY_DEEP, RED, STEEL, STEEL_LIGHT, STEEL_MID,
+from gfx import (BOLT_NEW, with_alpha, H, NAVY, NAVY_DEEP, RED, STEEL, STEEL_LIGHT, STEEL_MID,
                  TEAL, TEAL_DARK, TEAL_LIGHT, W, WHITE, _arrow, brand_background, clamp01,
                  draw_text, ease_in_out_cubic, ease_out_cubic, ease_out_expo, font, paint,
                  prog, text_width, wrap)
@@ -189,13 +189,32 @@ def header(c, t, cd, a):
                        paint(TEAL if on else STEEL, head * (1.0 if on else 0.35)))
 
 
-def card(c, t, dur, cid, times):
+def card(c, t, dur, cid, times, overlay=False):
+    """overlay=True: transparent, for text over the 3D background shots."""
     cd = CARDS[cid]
-    brand_background(c, t + 20)
+    if overlay:
+        _scrim(c)
+    else:
+        brand_background(c, t + 20)
     a = 1 - ease_in_out_cubic(prog(t, dur - 0.45, dur))
     header(c, t, cd, a)
     {"story": _story, "columns": _columns, "grid": _grid, "refs": _refs}[cd["layout"]](
-        c, t, dur, cd, times, a)
+        c, t, dur, cd, times, a, overlay)
+
+
+def card_overlay(c, t, dur, cid, times):
+    card(c, t, dur, cid, times, overlay=True)
+
+
+def _scrim(c):
+    """Navy wash on the left so text reads over any shot."""
+    sh = skia.GradientShader.MakeLinear(
+        [skia.Point(0, 0), skia.Point(2500, 0)],
+        [with_alpha(NAVY_DEEP, 0.9), with_alpha(NAVY_DEEP, 0.78), with_alpha(NAVY_DEEP, 0.0)],
+        [0.0, 0.55, 1.0])
+    c.drawRect(skia.Rect(0, 0, 2500, H), skia.Paint(Shader=sh))
+    c.drawRect(skia.Rect(0, 0, W, 10), paint(TEAL, 0.9))
+    c.drawRect(skia.Rect(0, 0, 360, 10), paint(RED, 1.0))
 
 
 def _active(t, times):
@@ -207,7 +226,7 @@ def _active(t, times):
 
 
 # ------------------------------------------------------------------ story --
-def _story(c, t, dur, cd, times, a):
+def _story(c, t, dur, cd, times, a, overlay=False):
     x0, width, y0, max_h = 200, 1640, 720, 1230
     size = 84
     while True:
@@ -230,7 +249,8 @@ def _story(c, t, dur, cd, times, a):
         else:
             y += lh * len(lines)
         y += pg
-    DIAGRAMS[cd["diagram"]](c, t, times, a * _ease_in(t, 0.3, 0.9), 2780, 1250)
+    if not overlay:
+        DIAGRAMS[cd["diagram"]](c, t, times, a * _ease_in(t, 0.3, 0.9), 2780, 1250)
 
 
 def _flow_offset(t, stop_at=None, v=260.0, decel=1.6):
@@ -576,7 +596,7 @@ def icon(c, kind, cx, cy, s, a, t, col=WHITE):
 
 
 # --------------------------------------------------------------- columns --
-def _columns(c, t, dur, cd, times, a):
+def _columns(c, t, dur, cd, times, a, overlay=False):
     beats = [(b, ti) for b, ti in zip(cd["beats"], times) if b["text"]]
     n = len(beats)
     gap = 90
@@ -604,7 +624,7 @@ def _columns(c, t, dur, cd, times, a):
 
 
 # ------------------------------------------------------------------ grid --
-def _grid(c, t, dur, cd, times, a):
+def _grid(c, t, dur, cd, times, a, overlay=False):
     # warning sign next to the title
     wa = ease_out_cubic(prog(t, 0.4, 1.1)) * a
     tw = text_width(cd["title"], font("cond_bold", 150), 4)
@@ -634,7 +654,7 @@ def _grid(c, t, dur, cd, times, a):
 
 
 # ------------------------------------------------------------------ refs --
-def _refs(c, t, dur, cd, times, a):
+def _refs(c, t, dur, cd, times, a, overlay=False):
     items = [(b, ti) for b, ti in zip(cd["beats"], times) if b["text"]]
     act = _active(t, times)
     f = font("med", 74)
@@ -652,3 +672,16 @@ def _refs(c, t, dur, cd, times, a):
                 draw_text(c, line, x + 220, ty, f, WHITE, alpha=ak * (1.0 if cur else 0.8))
                 ty += 100
         y += max(130, len(lines) * 100) + 120
+
+
+def section_timing(ids, durs=None):
+    """Back-to-back cards: [(id, start, dur, beat times)] and the section length."""
+    out, t = [], 0.0
+    for cid in ids:
+        times, dur = timing(cid, durs)
+        out.append(dict(id=cid, start=round(t, 3), dur=dur, times=times))
+        t += dur
+    return out, round(t, 3)
+
+
+BG_IDS = ["bg1", "bg2", "bg3", "bg4"]
